@@ -6,6 +6,11 @@ node_modules/
 *.key
 *.crt
 .env
+.env.*
+!.env.example
+.secrets/
+*.kubeconfig
+kubeconfig
 .DS_Store
 coverage/
 __pycache__/

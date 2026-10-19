@@ -1,0 +1,95 @@
+fullnameOverride: monitoring
+grafana:
+  enabled: false
+defaultRules:
+  create: false
+prometheus:
+  prometheusSpec:
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    retention: 24h
+    retentionSize: 512MB
+    resources:
+      requests: { cpu: 100m, memory: 384Mi }
+      limits: { cpu: "1", memory: 768Mi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: standard
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests: { storage: 2Gi }
+    serviceMonitorSelector:
+      matchLabels: { release: monitoring }
+    serviceMonitorNamespaceSelector:
+      matchLabels: { kubernetes.io/metadata.name: monitoring }
+    probeSelector:
+      matchLabels: { release: monitoring }
+    probeNamespaceSelector:
+      matchLabels: { kubernetes.io/metadata.name: monitoring }
+    ruleSelector:
+      matchLabels: { release: monitoring }
+    ruleNamespaceSelector:
+      matchLabels: { kubernetes.io/metadata.name: monitoring }
+alertmanager:
+  config:
+    global:
+      resolve_timeout: 1m
+    route:
+      receiver: local-webhook
+      group_by: [alertname, severity]
+      group_wait: 10s
+      group_interval: 30s
+      repeat_interval: 4h
+      routes: []
+    receivers:
+      - name: local-webhook
+        webhook_configs:
+          - url: http://monitoring-receiver.monitoring.svc:8080/alerts
+            send_resolved: true
+    inhibit_rules:
+      - source_matchers: ['severity="critical"']
+        target_matchers: ['severity="warning"']
+        equal: [alertname]
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 25m, memory: 64Mi }
+      limits: { cpu: 200m, memory: 128Mi }
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: standard
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests: { storage: 256Mi }
+prometheusOperator:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 300m, memory: 128Mi }
+  admissionWebhooks:
+    enabled: false
+  tls:
+    enabled: false
+  prometheusConfigReloader:
+    resources:
+      requests: { cpu: 5m, memory: 16Mi }
+      limits: { cpu: 100m, memory: 64Mi }
+kube-state-metrics:
+  collectors: [deployments, pods, nodes]
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+prometheus-node-exporter:
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { cpu: 100m, memory: 64Mi }
+kubeApiServer:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false

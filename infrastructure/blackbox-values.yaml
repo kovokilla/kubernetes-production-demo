@@ -1,0 +1,37 @@
+fullnameOverride: monitoring-blackbox
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { cpu: 200m, memory: 64Mi }
+podSecurityContext:
+  seccompProfile: { type: RuntimeDefault }
+serviceMonitor:
+  selfMonitor:
+    enabled: true
+    labels: { release: monitoring }
+config:
+  modules:
+    application_api:
+      prober: http
+      timeout: 5s
+      http:
+        method: GET
+        valid_status_codes: [200]
+        preferred_ip_protocol: ip4
+        follow_redirects: false
+        headers: { Host: demo.localhost }
+        fail_if_body_not_matches_regexp: ['"instance":']
+    jenkins_http:
+      prober: http
+      timeout: 5s
+      http:
+        method: GET
+        valid_status_codes: [200]
+        preferred_ip_protocol: ip4
+        follow_redirects: false
+    jenkins_ssh:
+      prober: tcp
+      timeout: 5s
+      tcp:
+        preferred_ip_protocol: ip4
+        query_response:
+          - expect: "^SSH-2.0"

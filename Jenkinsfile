@@ -27,6 +27,7 @@ pipeline {
             steps {
                 sh 'bash scripts/validate.sh'
                 sh 'bash scripts/validate-infrastructure.sh'
+                sh 'bash scripts/monitoring-check-rules.sh'
                 sh 'kubeconform -strict -summary -kubernetes-version 1.34.0 .artifacts/local.yaml .artifacts/production.yaml'
             }
         }

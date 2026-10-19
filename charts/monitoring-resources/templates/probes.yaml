@@ -1,0 +1,26 @@
+{{- range $probe := list
+  (dict "name" "application-api" "module" "application_api" "target" "http://traefik.ingress.svc.cluster.local:80/api/info")
+  (dict "name" "jenkins-controller" "module" "jenkins_http" "target" "http://jenkins-controller.monitoring.svc:8080/login")
+  (dict "name" "jenkins-agent-ssh" "module" "jenkins_ssh" "target" "jenkins-agent.monitoring.svc:22")
+}}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: {{ $probe.name }}
+  labels: { release: monitoring }
+spec:
+  jobName: {{ $probe.name }}
+  interval: 30s
+  scrapeTimeout: 10s
+  module: {{ $probe.module }}
+  prober:
+    url: monitoring-blackbox.monitoring.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - {{ $probe.target | quote }}
+      labels:
+        monitor_target: {{ $probe.name }}
+{{- end }}

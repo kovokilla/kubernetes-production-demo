@@ -1,4 +1,6 @@
 fullnameOverride: demo
+# Base values are an HTTPS deployment example, not runnable image references.
+# Local and Jenkins setup supply their own image/routing settings.
 message: Hello from Kubernetes!
 existingSecret: demo-app
 # Increment after rotating an environment-variable Secret to restart the backend.

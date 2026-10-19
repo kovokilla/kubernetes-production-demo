@@ -13,7 +13,7 @@ services:
     volumes:
       - jenkins-home:/var/jenkins_home
       - bootstrap-secrets:/run/secrets:ro
-    networks: [jenkins]
+    networks: [jenkins, kind]
     mem_limit: 1536m
   agent:
     image: production-demo/jenkins-agent:local

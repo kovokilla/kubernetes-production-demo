@@ -1,0 +1,68 @@
+rule_files: [alerts.yaml]
+evaluation_interval: 30s
+tests:
+  - name: Healthy probes do not fire availability alerts
+    interval: 30s
+    input_series:
+      - series: 'probe_success{monitor_target="application-api"}'
+        values: '1+0x10'
+      - series: 'probe_success{monitor_target="jenkins-controller"}'
+        values: '1+0x10'
+      - series: 'probe_success{monitor_target="jenkins-agent-ssh"}'
+        values: '1+0x10'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname=~"DemoAPIUnavailable|JenkinsControllerUnavailable|JenkinsAgentSSHUnavailable|MonitoringProbeMissing",alertstate="firing"}'
+        eval_time: 4m
+        exp_samples: []
+  - name: Failed application probe fires after the hold duration
+    interval: 30s
+    input_series:
+      - series: 'probe_success{monitor_target="application-api"}'
+        values: '0+0x10'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="DemoAPIUnavailable",alertstate="firing"}'
+        eval_time: 3m
+        exp_samples:
+          - labels: 'ALERTS{alertname="DemoAPIUnavailable",alertstate="firing",monitor_target="application-api",severity="critical"}'
+            value: 1
+  - name: Unavailable replicas fire after two minutes
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_spec_replicas{namespace="demo",deployment="demo-backend"}'
+        values: '2+0x10'
+      - series: 'kube_deployment_status_replicas_available{namespace="demo",deployment="demo-backend"}'
+        values: '1+0x10'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="DemoUnavailableReplicas",alertstate="firing"}'
+        eval_time: 3m
+        exp_samples:
+          - labels: 'ALERTS{alertname="DemoUnavailableReplicas",alertstate="firing",deployment="demo-backend",namespace="demo",severity="warning"}'
+            value: 1
+  - name: Two hour credential expiry produces a warning
+    interval: 30s
+    input_series:
+      - series: jenkins_deployer_credential_expiry_timestamp_seconds
+        values: '7200+0x10'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="JenkinsCredentialExpiring",alertstate="firing"}'
+        eval_time: 3m
+        exp_samples:
+          - labels: 'ALERTS{alertname="JenkinsCredentialExpiring",alertstate="firing",severity="warning"}'
+            value: 1
+      - expr: 'ALERTS{alertname="JenkinsCredentialExpiringSoon",alertstate="firing"}'
+        eval_time: 3m
+        exp_samples: []
+  - name: Half hour credential expiry is critical without duplicate warning
+    interval: 30s
+    input_series:
+      - series: jenkins_deployer_credential_expiry_timestamp_seconds
+        values: '1800+0x10'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="JenkinsCredentialExpiringSoon",alertstate="firing"}'
+        eval_time: 3m
+        exp_samples:
+          - labels: 'ALERTS{alertname="JenkinsCredentialExpiringSoon",alertstate="firing",severity="critical"}'
+            value: 1
+      - expr: 'ALERTS{alertname="JenkinsCredentialExpiring",alertstate="firing"}'
+        eval_time: 3m
+        exp_samples: []

@@ -1,6 +1,19 @@
 # Kubernetes application demo
 
-Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap and Secret configuration, RBAC, NetworkPolicy, and Jenkins container builds plus versioned Helm packages and deployment.
+Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap and Secret configuration, RBAC, NetworkPolicy, Jenkins CI/CD, and Prometheus/Alertmanager monitoring.
+
+**Application:** http://demo.localhost:8080 · **Jenkins:** http://127.0.0.1:8090 · **Job:** `production-demo`
+
+## Contents
+
+- [Architecture](#architecture)
+- [Run locally](#run-locally)
+- [Security](#security)
+- [Jenkins CI/CD](#jenkins-cicd)
+- [Prometheus and Alertmanager](#prometheus-and-alertmanager)
+- [Validation without a cluster](#validation-without-a-cluster)
+- [Operations and troubleshooting](#operations-and-troubleshooting)
+- [Cleanup](#cleanup)
 
 ## Architecture
 
@@ -19,29 +32,39 @@ Local kind is a reproducible exercise environment, not a highly available produc
 
 - `apps/frontend`, `apps/backend`: applications, tests and Dockerfiles.
 - `charts/webapp`: application Helm chart.
+- `charts/monitoring-resources`: monitoring probes, alert rules and local receiver.
 - `environments/local/values.yaml`: local images and HTTP ingress.
 - `environments/production/values.yaml`: optional HTTPS configuration for a real deployment.
 - `environments/jenkins/values.yaml`: local-kind delivery settings used by Jenkins.
 - `infrastructure`: kind, namespaces, pinned dependency versions, Traefik and optional deployment RBAC.
+- `infrastructure/monitoring-values.yaml`, `infrastructure/blackbox-values.yaml`: bounded monitoring stack settings.
 - `Jenkinsfile`: checkout → validate → build → load images → package → deploy → verify.
 - `jenkins`: Docker Compose controller/agent, pinned plugins and configuration as code.
 - `scripts`: bootstrap, local deployment and validation.
 
 ## Run locally
 
-Prerequisites: a running Docker-compatible daemon, kind, kubectl, Helm 3, Python 3.9+ and Node.js 24+. On macOS, install and start Docker Desktop or another kind-compatible Docker provider, then install the CLI tools:
+Prerequisites: Docker Desktop with its Compose plugin, kind, Python 3.9+, Node.js 24+, OpenSSH tools and GitHub CLI. The application can run on other Kubernetes platforms, but the pinned Jenkins controller/agent images in this repository target ARM64. The documented setup is macOS on Apple Silicon.
+
+For a fresh checkout, install and start Docker Desktop, then:
 
 ```bash
-brew install kind kubectl helm node python
+brew install kind gh node python
+gh auth login
+gh repo clone kovokilla/kubernetes-production-demo ~/kubernetes-production-demo
 cd ~/kubernetes-production-demo
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements-dev.txt
+python3 scripts/fetch-helm.py
+python3 scripts/fetch-kubectl.py
 bash scripts/validate.sh
 bash scripts/bootstrap.sh
 bash scripts/deploy-local.sh
 bash scripts/smoke-test.sh
 ```
+
+Skip cloning if you already have the repository. GitHub authentication must permit reading the private repository; Jenkins setup also requires permission to register a read-only deploy key. Internet access is needed for image, plugin, binary and chart downloads, and SSH access to GitHub is needed for Jenkins checkout.
 
 Allocate approximately 4 CPUs and 6 GB RAM for the application, or 8 CPUs and 8 GB RAM with Jenkins. Ports 8080 and 8443 must be free; Jenkins additionally uses 8090. Bootstrap downloads the pinned kind node, Calico manifest and Traefik chart. Review dependency versions in `infrastructure/versions.env` before upgrading.
 
@@ -51,9 +74,11 @@ Open **http://demo.localhost:8080**. If your resolver does not support `.localho
 curl --fail -H 'Host: demo.localhost' http://127.0.0.1:8080/api/info
 ```
 
-All cluster scripts explicitly target `kind-production-demo`; they do not use your current Kubernetes context. Images are built locally and loaded directly into kind, with `imagePullPolicy: Never`. Re-running deployment rebuilds the images and restarts the Deployments.
+All cluster scripts explicitly target `kind-production-demo`; they do not use your current Kubernetes context. Images are built locally and loaded directly into kind, with `imagePullPolicy: Never`. Before Jenkins takes ownership, re-running local deployment rebuilds the images and restarts the Deployments. Afterward, use the Jenkins job instead; the local script deliberately refuses competing updates.
 
-Scripts also detect Docker Desktop's standard macOS CLI directory when it is missing from PATH. Use kubectl 1.34 for the pinned Kubernetes 1.34 cluster (supported clients are within one minor version); a matching binary in `.tools/kubectl` takes precedence over the globally installed client.
+The fetch helpers verify official SHA256 checksums and install Helm 3.19.0 and kubectl 1.34.0 into ignored `.tools/`, without changing global tool configuration. Project scripts prioritize that directory and detect Docker Desktop's standard macOS CLI directory if needed. A current Homebrew kubectl may be too new for the pinned Kubernetes 1.34 cluster; supported clients are within one minor version.
+
+The chart's base values and `environments/production/values.yaml` are **examples**, with placeholder published images and an HTTPS hostname. Do not deploy them unchanged. `environments/local/values.yaml` supplies runnable local images and HTTP routing; Jenkins generates its own release values from `environments/jenkins/values.yaml`. A real cloud deployment additionally needs published images, DNS, a trusted TLS certificate and an enforcing CNI.
 
 The Secret generation script creates a random key directly through Kubernetes stdin, without writing a plaintext credentials file, printing the value or replacing an existing Secret. Secrets are not Helm-managed. To rotate a key, use your secret-management process and increment `secretRevision` in chart values to restart pods consuming it as an environment variable.
 
@@ -118,13 +143,15 @@ python3 scripts/jenkins-client.py status
 
 The deployer can manage namespaced application resources but cannot list all Secrets, read nodes or create cluster roles. Helm uses `HELM_DRIVER=configmap`, avoiding broad Secret storage permissions. Existing application resources are adopted under the same release name; old Secret-backed local Helm history is preserved. `deploy-local.sh` refuses to overwrite a ConfigMap-backed CI-managed release.
 
-Renew before expiry, and after recreating the kind cluster:
+Renew before expiry on the existing cluster:
 
 ```bash
 bash scripts/jenkins-refresh-credentials.sh
 ```
 
-This refreshes the protected kubeconfig and reloads Jenkins configuration without printing tokens. Expiry metadata is stored in `~/.local/share/kubernetes-production-demo/jenkins/credential-expiry`. Use the same `HELM_DRIVER=configmap` when inspecting or rolling back the Jenkins-managed release.
+This refreshes the protected kubeconfig and reloads Jenkins configuration without printing tokens. Renewal is **manual**, not scheduled: after expiry, the deploy stage fails until the credential is renewed. Expiry metadata is stored in `~/.local/share/kubernetes-production-demo/jenkins/credential-expiry`. After cluster recreation, re-run bootstrap and `jenkins-setup.sh` so namespaces, Secrets and deployer RBAC are also restored.
+
+Use `HELM_DRIVER=configmap` when inspecting or rolling back the Jenkins-managed release. A normal `helm list` with the default Secret driver can display preserved pre-Jenkins history instead of the active CI release.
 
 ### Trust boundary and lifecycle
 
@@ -137,7 +164,83 @@ docker compose -f jenkins/compose.yaml stop
 docker compose -f jenkins/compose.yaml start
 ```
 
-If the Docker CLI is not on PATH, use `/Applications/Docker.app/Contents/Resources/bin/docker`. Back up Jenkins home and protected local state securely; they contain sensitive material. Do not archive them in builds. Decommission by stopping Jenkins, removing its read-only GitHub deploy key, and deleting the `demo-deployer` ServiceAccount/Role/RoleBinding to revoke cluster access. Remove volumes/state only after a deliberate backup/data-retention decision.
+If the Docker CLI is not on PATH, use `/Applications/Docker.app/Contents/Resources/bin/docker`. Back up Jenkins home and protected local state securely; they contain sensitive material. Do not archive them in builds. Changes to controller/agent Dockerfiles, plugins or bootstrap configuration require a reviewed rebuild/recreation through `jenkins-setup.sh`; an application build does not automatically reconfigure Jenkins itself.
+
+## Prometheus and Alertmanager
+
+Monitoring is separate from Jenkins and the application Helm release. From the repository root, with the kind cluster and Jenkins already running:
+
+```bash
+bash scripts/monitoring-setup.sh
+python3 scripts/monitoring-verify.py
+```
+
+The setup requires your administrator workstation context, not the restricted Jenkins credential. It installs pinned `kube-prometheus-stack` 92.10.1, `prometheus-blackbox-exporter` 11.20.0 and the local `monitoring-resources` chart into namespace `monitoring`. Grafana and kind-unreachable control-plane collectors are deliberately disabled. Application default-deny NetworkPolicies remain unchanged.
+
+Prometheus scrapes/evaluates every 30 seconds, retains up to 24 hours of samples with a 512 MB size limit and uses a 2 Gi local-path PVC. Alertmanager has a 256 Mi PVC for its local state. Explicit resource requests/limits keep the stack small; Prometheus itself is limited to 768 Mi RAM. Allow roughly 1–1.5 Gi additional Docker memory headroom including transient startup/build usage. PVC data survives pod restarts but not deletion of the kind cluster.
+
+### Private UI access
+
+Both UIs are ClusterIP-only; no public ingress or always-running host port is created. Start these foreground port-forwards in **separate terminals**, then open the corresponding URL:
+
+```bash
+.tools/kubectl --context kind-production-demo -n monitoring port-forward --address 127.0.0.1 service/monitoring-prometheus 9090:9090
+```
+
+Prometheus: **http://127.0.0.1:9090** — inspect targets, rules, alerts and metrics.
+
+```bash
+.tools/kubectl --context kind-production-demo -n monitoring port-forward --address 127.0.0.1 service/monitoring-alertmanager 9093:9093
+```
+
+Alertmanager: **http://127.0.0.1:9093** — inspect grouped alerts and silences. Stop each port-forward with Ctrl+C when finished.
+
+### Monitored paths and alerts
+
+The application probe calls `/api/info` through Traefik with `Host: demo.localhost`, checking frontend → backend connectivity as well as HTTP 200 and an instance field. Jenkins probes check controller `/login` availability and the agent's SSH banner. Kubernetes metrics provide Deployment replica and container restart signals.
+
+Rules in `charts/monitoring-resources/files/alerts.yaml`:
+
+- `DemoUnavailableReplicas`: a desired frontend/backend replica is unavailable for two minutes.
+- `DemoFrequentRestarts`: more than three application-container restarts over 15 minutes, sustained for two minutes.
+- `DemoAPIUnavailable`: the end-to-end API probe fails for one minute.
+- `JenkinsControllerUnavailable`: Jenkins login HTTP checks fail for one minute.
+- `JenkinsAgentSSHUnavailable`: the agent SSH endpoint is unavailable for two minutes.
+- `MonitoringTargetDown`: a selected monitoring scrape fails for two minutes.
+- `MonitoringProbeMissing`: an expected application/Jenkins probe disappears for three minutes.
+- `JenkinsCredentialExpiring`: expiry is between one and four hours away, sustained for one minute.
+- `JenkinsCredentialExpiringSoon`: expiry is less than one hour away or already passed, sustained for one minute.
+- `JenkinsCredentialMetadataMissing`: the public expiry metric is absent/zero for five minutes.
+
+These are availability and credential-expiry alerts, **not** Jenkins build-result metrics, Jenkins agent-connection-state checks, application request/error-rate metrics or Warp usage/billing measurements. A single local monitoring installation also cannot send an alert when the entire Mac/Prometheus/Alertmanager is down; external paging/watchdog infrastructure would be needed for that.
+
+### Local alert delivery and verification
+
+Alertmanager groups notifications for ten seconds and sends firing/resolved alerts to `monitoring-receiver`, a private ClusterIP webhook. The receiver logs bounded summaries containing alert name, severity, namespace and status. It does not log complete notification bodies, annotations or credentials. NetworkPolicy limits receiver ingress to Prometheus and Alertmanager pods in its namespace.
+
+**No email, Slack or external paging is configured.** This is intentional, testable local delivery—not a production notification guarantee. To add an external destination, configure a real Alertmanager receiver and store its authentication/webhook credentials outside Git. The local receiver's counters/logs are diagnostic and reset on restart; they are not a durable billing or audit ledger.
+
+`monitoring-verify.py` checks all active targets, the three probes, ten loaded rules and the Alertmanager connection. It temporarily creates `MonitoringSmokeTest`, verifies delivery through Prometheus → Alertmanager → receiver, then removes the rule and closes its loopback port-forwards. It does not stop the app or Jenkins. Alert resolution may take another evaluation/grouping interval after test-rule removal.
+
+### Jenkins address and expiry synchronization
+
+The Jenkins controller joins Docker's existing `kind` network without exposing its host port beyond loopback. Monitoring Services use EndpointSlices populated from current Docker addresses, not fixed IPs. Re-sync after manually recreating or changing containers:
+
+```bash
+python3 scripts/monitoring-sync-targets.py
+```
+
+Jenkins setup and credential renewal call this helper automatically when monitoring is installed. The helper reads only the non-secret `credential-expiry` timestamp file, publishing it through a ConfigMap and gauge. No token, kubeconfig, password or private key is exposed to Prometheus, and Jenkins receives no additional Kubernetes permissions.
+
+Configuration and rule validation, including synthetic rule-evaluation cases:
+
+```bash
+bash scripts/validate.sh
+bash scripts/validate-infrastructure.sh
+bash scripts/monitoring-check-rules.sh
+```
+
+These checks do not need a running Kubernetes cluster, but chart/image downloads require internet access. The last command requires Docker and runs native `promtool` checks using streamed inputs; it also works inside the Dockerized Jenkins agent. Monitoring installation is an administrator operation, not an automatic stage in the restricted application deployment job.
 
 ## Validation without a cluster
 
@@ -155,10 +258,50 @@ python3 scripts/fetch-kubeconform.py
 .tools/kubeconform -strict -summary -kubernetes-version 1.34.0 .artifacts/local.yaml .artifacts/production.yaml
 ```
 
-Rendered manifests and the local chart package are written to ignored `.artifacts/`. These checks do not prove image builds, actual NetworkPolicy enforcement or live rollout behavior; run bootstrap, deployment and smoke tests with Docker and Kubernetes available.
-
-To remove only the exercise cluster and its in-cluster data:
+Include `.artifacts/jenkins.yaml` to check the Jenkins overlay as well. With Jenkins running, its native Declarative Pipeline validator checks the Jenkinsfile without triggering a build:
 
 ```bash
+python3 scripts/jenkins-client.py lint
+```
+
+Rendered manifests and the local chart package are written to ignored `.artifacts/`. These checks do not prove image builds, actual NetworkPolicy enforcement or live rollout behavior; run bootstrap, deployment and smoke tests with Docker and Kubernetes available.
+
+## Operations and troubleshooting
+
+From the repository root:
+
+```bash
+python3 scripts/jenkins-client.py status
+.tools/kubectl --context kind-production-demo -n demo get deployments,pods,services,ingress
+HELM_DRIVER=configmap .tools/helm --kube-context kind-production-demo -n demo history demo
+```
+
+- **No automatic build:** confirm the Jenkinsfile is pushed to `main`, the Mac is awake, Docker is running and `kind-builder` is online. Allow up to two minutes for polling. Use `jenkins-client.py bootstrap` if no initial successful checkout exists.
+- **Unauthorized/expired deploy credential:** run `bash scripts/jenkins-refresh-credentials.sh`. Do not replace it with an administrator kubeconfig.
+- **Missing local image:** use the full Jenkins build to preload every node. An archived chart alone cannot fetch these `Never`-pull images.
+- **App name does not resolve:** use the explicit Host-header curl command above. Check that ports 8080, 8443 and 8090 are not claimed by another service.
+- **Jenkins is still starting or an agent is offline:** inspect service status with `docker compose -f jenkins/compose.yaml ps`. Controller/plugin downloads and SSH startup can take time. Do not paste raw credential files or unreviewed logs into issue reports.
+
+Use `python3 scripts/jenkins-client.py log 3` to inspect a specific build; substitute the required build number. The helper masks known local credentials, but review logs before sharing them.
+
+For an intentional rollback, inspect Helm history first, then select an existing revision whose images are still present on every kind node. For example, to roll back to revision 1:
+
+```bash
+HELM_DRIVER=configmap .tools/helm --kube-context kind-production-demo -n demo rollback demo 1 --wait --timeout 5m
+```
+
+The next successful Jenkins build deploys its newly packaged revision. Do not use `deploy-local.sh` to roll back a Jenkins-owned release.
+
+## Cleanup
+
+Stop Jenkins before removing its target cluster. These commands preserve Jenkins volumes, archived builds and protected credential files, but **cluster deletion removes all in-cluster resources and application Secrets**:
+```bash
+docker compose -f jenkins/compose.yaml stop
 kind delete cluster --name production-demo
 ```
+
+To decommission permanently, also remove the read-only deploy key from the GitHub repository and revoke `demo-deployer` access if the cluster is retained. Review backups and retention requirements before removing Jenkins volumes or protected local state. Do not use broad Docker prune commands or `compose down -v` as routine repository cleanup.
+
+To remove monitoring while retaining the application and cluster, uninstall `monitoring-resources`, then `monitoring-blackbox`, then `monitoring`, using Helm with context `kind-production-demo` and namespace `monitoring`. Helm preserves monitoring PVCs and operator CRDs; review their data and any remaining resources before deliberate deletion. Do not delete shared CRDs or persistent volumes as routine cleanup.
+
+Git excludes `.tools/`, `.artifacts/`, `.venv/`, Python caches, environment secrets and kubeconfigs. Credentials are held outside the checkout; no password, private key, kubeconfig or Jenkins data volume belongs in the repository or a build artifact.

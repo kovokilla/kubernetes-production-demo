@@ -1,4 +1,5 @@
-# CI updates these references in the release artifact after both builds succeed.
+# Example only: replace image references and the TLS hostname before using.
+# Jenkins uses environments/jenkins/values.yaml, not this production example.
 frontend:
   image:
     repository: ghcr.io/replace-owner/replace-repo/frontend

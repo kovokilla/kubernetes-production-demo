@@ -1,0 +1,85 @@
+groups:
+  - name: application-and-jenkins
+    rules:
+      - alert: DemoUnavailableReplicas
+        expr: |
+          kube_deployment_spec_replicas{namespace="demo",deployment=~"demo-(frontend|backend)"}
+          - kube_deployment_status_replicas_available{namespace="demo",deployment=~"demo-(frontend|backend)"} > 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: Application deployment has unavailable replicas
+          description: Check pod events, readiness probes and the latest Jenkins rollout.
+      - alert: DemoFrequentRestarts
+        expr: increase(kube_pod_container_status_restarts_total{namespace="demo",container=~"frontend|backend"}[15m]) > 3
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: Application container is restarting repeatedly
+          description: Inspect container logs, resource limits and liveness probes.
+      - alert: DemoAPIUnavailable
+        expr: probe_success{monitor_target="application-api"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: End-to-end application API probe is failing
+          description: Check Traefik, frontend proxy, backend and NetworkPolicy paths.
+      - alert: JenkinsControllerUnavailable
+        expr: probe_success{monitor_target="jenkins-controller"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: Jenkins controller login endpoint is unavailable
+          description: Check Docker Desktop, controller status and synchronized EndpointSlices.
+      - alert: JenkinsAgentSSHUnavailable
+        expr: probe_success{monitor_target="jenkins-agent-ssh"} == 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: Jenkins build agent SSH endpoint is unavailable
+          description: This checks SSH availability, not Jenkins agent connection state or build results.
+      - alert: MonitoringTargetDown
+        expr: up{namespace="monitoring"} == 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: A monitoring scrape target is unreachable
+          description: Check Prometheus targets and the relevant ServiceMonitor or Probe.
+      - alert: MonitoringProbeMissing
+        expr: |
+          absent(probe_success{monitor_target="application-api"})
+          or absent(probe_success{monitor_target="jenkins-controller"})
+          or absent(probe_success{monitor_target="jenkins-agent-ssh"})
+        for: 3m
+        labels: { severity: warning }
+        annotations:
+          summary: An expected application or Jenkins probe is missing
+          description: Check Probe resource selection and blackbox exporter availability.
+      - alert: JenkinsCredentialExpiring
+        expr: |
+          jenkins_deployer_credential_expiry_timestamp_seconds - time() < 14400
+          and jenkins_deployer_credential_expiry_timestamp_seconds - time() >= 3600
+          and jenkins_deployer_credential_expiry_timestamp_seconds > 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: Jenkins deployment credential expires within four hours
+          description: Run bash scripts/jenkins-refresh-credentials.sh on the administrator workstation.
+      - alert: JenkinsCredentialExpiringSoon
+        expr: |
+          jenkins_deployer_credential_expiry_timestamp_seconds - time() < 3600
+          and jenkins_deployer_credential_expiry_timestamp_seconds > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: Jenkins deployment credential expires within one hour or has expired
+          description: Renew the restricted deployment credential; do not substitute an administrator kubeconfig.
+      - alert: JenkinsCredentialMetadataMissing
+        expr: |
+          absent(jenkins_deployer_credential_expiry_timestamp_seconds)
+          or jenkins_deployer_credential_expiry_timestamp_seconds == 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: Deployment credential expiry metadata is unavailable
+          description: Run python3 scripts/monitoring-sync-targets.py from the administrator workstation.

@@ -1,0 +1,7 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: application-and-jenkins
+  labels: { release: monitoring }
+spec:
+  {{- .Files.Get "files/alerts.yaml" | nindent 2 }}
