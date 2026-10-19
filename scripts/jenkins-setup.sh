@@ -10,4 +10,5 @@ python3 "$ROOT/scripts/jenkins-provision.py"
 unset KUBE_DEPLOY_TOKEN
 docker compose -f "$ROOT/jenkins/compose.yaml" up -d
 python3 "$ROOT/scripts/jenkins-client.py" wait
+python3 "$ROOT/scripts/jenkins-client.py" bootstrap
 printf 'Jenkins ready: http://127.0.0.1:8090 (user: admin). Credentials are in the protected local state directory.\n'

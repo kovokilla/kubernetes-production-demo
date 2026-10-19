@@ -61,6 +61,14 @@ def main(action, number=None):
             print(result)
             if "successfully validated" not in result:
                 raise SystemExit(1)
+    elif action == "bootstrap":
+        with request(opener, "/job/production-demo/api/json?tree=lastSuccessfulBuild[number],lastBuild[building],inQueue") as response:
+            job = json.load(response)
+        if not job.get("lastSuccessfulBuild") and not job["inQueue"] and not (job.get("lastBuild") or {}).get("building"):
+            with request(opener, "/job/production-demo/build", b"") as response:
+                print(f"Initial SCM baseline build queued: HTTP {response.status}")
+        else:
+            print("SCM baseline exists or its initial build is already pending")
     elif action in ("build", "reload"):
         endpoint = "/job/production-demo/build" if action == "build" else "/configuration-as-code/reload"
         with request(opener, endpoint, b"") as response:
@@ -82,7 +90,7 @@ def main(action, number=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["wait", "status", "lint", "build", "reload", "log"])
+    parser.add_argument("action", choices=["wait", "status", "lint", "bootstrap", "build", "reload", "log"])
     parser.add_argument("number", nargs="?")
     args = parser.parse_args()
     try:

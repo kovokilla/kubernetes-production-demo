@@ -79,6 +79,8 @@ All other application pod ingress and egress is denied. Return traffic for permi
 
 The private source repository remains on GitHub. Jenkins polls only `main` every two minutes; no public webhook, tunnel or GitHub Actions runner is needed. The local setup targets Apple Silicon/Linux ARM64 containers and requires Docker Compose plus an authenticated `gh` CLI with permission to register a read-only repository deploy key.
 
+Commit and push the Jenkinsfile before the first setup. Setup queues an initial build to establish the SCM checkout baseline; subsequent pushes are detected by polling. If setup happened before the Jenkinsfile was available, run `python3 scripts/jenkins-client.py bootstrap` after pushing it.
+
 After the cluster bootstrap above:
 
 ```bash

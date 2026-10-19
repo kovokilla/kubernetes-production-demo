@@ -38,6 +38,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("disableConcurrentBuilds()", pipeline)
         self.assertIn("file(credentialsId: 'kind-deployer'", pipeline)
         self.assertIn("--atomic --wait", pipeline)
+        self.assertFalse((ROOT / ".github/workflows/ci-cd.yaml").exists())
+        self.assertIn('scripts/jenkins-client.py" bootstrap', (ROOT / "scripts/jenkins-setup.sh").read_text())
         for script in re.findall(r"sh '''(.*?)'''", pipeline, flags=re.S):
             result = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
