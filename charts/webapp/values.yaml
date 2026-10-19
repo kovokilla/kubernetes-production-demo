@@ -1,0 +1,42 @@
+fullnameOverride: demo
+message: Hello from Kubernetes!
+existingSecret: demo-app
+# Increment after rotating an environment-variable Secret to restart the backend.
+secretRevision: "1"
+imagePullSecrets: []
+frontend:
+  image:
+    repository: ghcr.io/replace-owner/replace-repo/frontend
+    tag: initial
+    digest: ""
+    pullPolicy: IfNotPresent
+  replicas: 2
+  resources:
+    requests: { cpu: 100m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 128Mi }
+backend:
+  image:
+    repository: ghcr.io/replace-owner/replace-repo/backend
+    tag: initial
+    digest: ""
+    pullPolicy: IfNotPresent
+  replicas: 2
+  resources:
+    requests: { cpu: 100m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 128Mi }
+ingress:
+  enabled: true
+  className: traefik
+  host: demo.example.com
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+  tls:
+    enabled: true
+    secretName: demo-tls
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress
+rbac:
+  enabled: true
+  readerGroup: demo-readers

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kubernetes Production Demo</title>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <h1>Kubernetes Production Demo</h1>
+      <p>Frontend → ClusterIP Service → backend</p>
+      <button id="refresh" type="button">Refresh API response</button>
+      <pre id="result" aria-live="polite">Loading…</pre>
+      <p>The pod identity can change as traffic is balanced across replicas.</p>
+    </main>
+  </body>
+</html>

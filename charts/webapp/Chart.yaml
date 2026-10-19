@@ -1,0 +1,7 @@
+apiVersion: v2
+name: webapp
+description: Hardened frontend and backend Kubernetes demonstration
+type: application
+version: 0.1.0
+appVersion: "initial"
+kubeVersion: ">=1.30.0-0"

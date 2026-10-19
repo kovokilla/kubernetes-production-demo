@@ -1,0 +1,30 @@
+deployment:
+  replicas: 2
+service:
+  spec:
+    type: NodePort
+ports:
+  web:
+    nodePort: 30080
+  websecure:
+    nodePort: 30443
+providers:
+  kubernetesIngress:
+    enabled: true
+  kubernetesCRD:
+    enabled: false
+ingressClass:
+  enabled: true
+  isDefaultClass: false
+  name: traefik
+ingressRoute:
+  dashboard:
+    enabled: false
+log:
+  format: json
+accessLog:
+  enabled: true
+  format: json
+resources:
+  requests: { cpu: 100m, memory: 64Mi }
+  limits: { cpu: 500m, memory: 256Mi }

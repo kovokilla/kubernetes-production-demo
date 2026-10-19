@@ -1,0 +1,52 @@
+# Optional: apply as an administrator on the CI deployment target.
+# Use HELM_DRIVER=configmap with these permissions.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-deployer
+  namespace: demo
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: demo-deployer
+  namespace: demo
+rules:
+  - apiGroups: [""]
+    resources: [configmaps, services, serviceaccounts]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log, endpoints, events]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [demo-app, demo-tls]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles]
+    resourceNames: [demo-reader]
+    verbs: [bind]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: demo-deployer
+  namespace: demo
+subjects:
+  - kind: ServiceAccount
+    name: demo-deployer
+    namespace: demo
+roleRef:
+  kind: Role
+  name: demo-deployer
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,14 @@
+# CI updates these references in the release artifact after both builds succeed.
+frontend:
+  image:
+    repository: ghcr.io/replace-owner/replace-repo/frontend
+    tag: initial
+backend:
+  image:
+    repository: ghcr.io/replace-owner/replace-repo/backend
+    tag: initial
+ingress:
+  host: demo.example.com
+  tls:
+    enabled: true
+    secretName: demo-tls
