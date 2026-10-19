@@ -1,0 +1,58 @@
+jenkins:
+  systemMessage: "Local Kubernetes demo — trusted main builds only"
+  numExecutors: 0
+  mode: EXCLUSIVE
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: "${admin_password}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  nodes:
+    - permanent:
+        name: kind-builder
+        labelString: kind-builder
+        numExecutors: 1
+        mode: EXCLUSIVE
+        remoteFS: /home/jenkins/agent
+        launcher:
+          ssh:
+            host: agent
+            port: 22
+            credentialsId: agent-ssh
+            javaPath: /opt/java/openjdk/bin/java
+            launchTimeoutSeconds: 60
+            maxNumRetries: 10
+            retryWaitTime: 10
+            sshHostKeyVerificationStrategy:
+              manuallyProvidedKeyVerificationStrategy:
+                key: "${agent_host_key_public}"
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - basicSSHUserPrivateKey:
+              scope: SYSTEM
+              id: agent-ssh
+              username: jenkins
+              privateKeySource:
+                directEntry:
+                  privateKey: "${agent_key}"
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: github-read-only
+              username: git
+              privateKeySource:
+                directEntry:
+                  privateKey: "${github_deploy_key}"
+          - file:
+              scope: GLOBAL
+              id: kind-deployer
+              fileName: kubeconfig
+              secretBytes: "${readFileBase64:/run/secrets/kubeconfig}"
+unclassified:
+  location:
+    url: http://localhost:8090/

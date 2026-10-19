@@ -1,0 +1,10 @@
+.git
+.tools
+.artifacts
+.venv
+**/__pycache__
+**/*.pyc
+.env
+*.key
+*.pem
+*.crt

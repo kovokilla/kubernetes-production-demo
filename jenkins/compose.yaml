@@ -1,0 +1,46 @@
+name: production-demo-jenkins
+services:
+  controller:
+    image: production-demo/jenkins-controller:local
+    build:
+      context: ./controller
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8080"
+    environment:
+      JAVA_OPTS: "-Xms256m -Xmx1024m -Djenkins.install.runSetupWizard=false"
+      CASC_JENKINS_CONFIG: /usr/share/jenkins/ref/jenkins.yaml
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - bootstrap-secrets:/run/secrets:ro
+    networks: [jenkins]
+    mem_limit: 1536m
+  agent:
+    image: production-demo/jenkins-agent:local
+    build:
+      context: ..
+      dockerfile: jenkins/agent/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - agent-work:/home/jenkins/agent
+      - agent-secrets:/opt/agent-secrets:ro
+      - /var/run/docker.sock:/opt/docker.sock
+    networks:
+      jenkins:
+        aliases: [agent]
+      kind: {}
+    mem_limit: 1536m
+volumes:
+  jenkins-home:
+  agent-work:
+  bootstrap-secrets:
+    name: production-demo-jenkins-secrets
+    external: true
+  agent-secrets:
+    name: production-demo-jenkins-agent-secrets
+    external: true
+networks:
+  jenkins: {}
+  kind:
+    external: true
+    name: kind

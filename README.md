@@ -1,6 +1,6 @@
 # Kubernetes application demo
 
-Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap and Secret configuration, RBAC, NetworkPolicy, and GitHub Actions container builds plus versioned Helm packages.
+Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap and Secret configuration, RBAC, NetworkPolicy, and Jenkins container builds plus versioned Helm packages and deployment.
 
 ## Architecture
 
@@ -20,9 +20,11 @@ Local kind is a reproducible exercise environment, not a highly available produc
 - `apps/frontend`, `apps/backend`: applications, tests and Dockerfiles.
 - `charts/webapp`: application Helm chart.
 - `environments/local/values.yaml`: local images and HTTP ingress.
-- `environments/production/values.yaml`: deployment settings used by CI.
+- `environments/production/values.yaml`: optional HTTPS configuration for a real deployment.
+- `environments/jenkins/values.yaml`: local-kind delivery settings used by Jenkins.
 - `infrastructure`: kind, namespaces, pinned dependency versions, Traefik and optional deployment RBAC.
-- `.github/workflows/ci-cd.yaml`: validate → build → package/publish → optional deploy.
+- `Jenkinsfile`: checkout → validate → build → load images → package → deploy → verify.
+- `jenkins`: Docker Compose controller/agent, pinned plugins and configuration as code.
 - `scripts`: bootstrap, local deployment and validation.
 
 ## Run locally
@@ -41,7 +43,7 @@ bash scripts/deploy-local.sh
 bash scripts/smoke-test.sh
 ```
 
-Allocate approximately 4 CPUs and 6 GB RAM to the Docker VM. Ports 8080 and 8443 must be free. Bootstrap downloads the pinned kind node, Calico manifest and Traefik chart. Review dependency versions in `infrastructure/versions.env` before upgrading.
+Allocate approximately 4 CPUs and 6 GB RAM for the application, or 8 CPUs and 8 GB RAM with Jenkins. Ports 8080 and 8443 must be free; Jenkins additionally uses 8090. Bootstrap downloads the pinned kind node, Calico manifest and Traefik chart. Review dependency versions in `infrastructure/versions.env` before upgrading.
 
 Open **http://demo.localhost:8080**. If your resolver does not support `.localhost`, test using the explicit Host header:
 
@@ -73,37 +75,67 @@ All other application pod ingress and egress is denied. Return traffic for permi
 
 `smoke-test.sh` verifies the full ingress/API path, positive and negative RBAC checks, allowed frontend → backend traffic, denied backend → frontend traffic, and denied access from an unrelated namespace. It creates a temporary test namespace and removes it afterward. It requires administrator impersonation and namespace-creation rights; it is not intended to run as `demo-reader`.
 
-## GitHub Actions
+## Jenkins CI/CD
 
-Push this directory as the **root of a GitHub repository**, using branch `main`. No local Git repository, remote, commits or cloud resources are created by the setup scripts.
+The private source repository remains on GitHub. Jenkins polls only `main` every two minutes; no public webhook, tunnel or GitHub Actions runner is needed. The local setup targets Apple Silicon/Linux ARM64 containers and requires Docker Compose plus an authenticated `gh` CLI with permission to register a read-only repository deploy key.
 
-The workflow:
+After the cluster bootstrap above:
 
-1. Runs application and release-script tests, syntax checks, Helm lint/template, architecture/security assertions and Kubernetes schema validation.
-2. On `main` pushes or manual workflow dispatch, builds **both** images for `linux/amd64` and `linux/arm64` and publishes to GHCR. Pull requests validate without publishing.
-3. Uses commit tags for traceability and immutable `sha256` image digests for deployments.
-4. Updates chart defaults, release values, chart version (`0.1.<workflow-run-number>`) and `appVersion` in the release workspace.
-5. Packages and pushes the updated chart to `oci://ghcr.io/<owner>/charts/webapp`, and uploads a `helm-release` artifact containing the `.tgz` and `values.yaml`.
-6. Optionally installs that exact package with Helm, waits for rollout and automatically rolls back a failed upgrade.
+```bash
+bash scripts/jenkins-setup.sh
+python3 scripts/jenkins-client.py status
+python3 scripts/jenkins-client.py lint
+```
 
-The pipeline does **not** commit generated versions to Git. The published package and workflow artifact are the release records. Build/package jobs have `contents: read` and `packages: write` only. `GITHUB_TOKEN` supplies registry authorization; no personal token is required for publishing. Ensure repository/organization policy permits package publishing. If packages with these names already exist, grant the repository access to them.
+Open **http://127.0.0.1:8090**, username **admin**. Setup generates the password into a protected local file, `~/.local/share/kubernetes-production-demo/jenkins/admin_password`; import it securely into your password manager. The directory is mode 0700 and credential files are mode 0600. No credential contents are printed.
 
-Image names are `ghcr.io/<owner>/<repository>/frontend` and `.../backend`. Image references are generated automatically; the initial placeholders in source values are never used for a published release. For simple anonymous pulls, make both container packages public. For private packages, provision a `kubernetes.io/dockerconfigjson` Secret in `demo` and set `imagePullSecrets` in `environments/production/values.yaml`.
+The controller has zero executors, no Docker socket, no anonymous access and no public listener. It connects to the separate `kind-builder` SSH agent using a dedicated private key and a pinned host public key. Private checkout uses a separate read-only GitHub deploy key; GitHub SSH host keys come from the authenticated HTTPS metadata API, not a trust-all SSH setting. Controller bootstrap secrets and agent bootstrap files are separate Docker volumes.
 
-### Optional continuous deployment
+The `production-demo` Pipeline-from-SCM job:
 
-Builds and packaging work without cluster credentials. To enable actual deployment:
+1. Checks out trusted `main` and records the full commit SHA.
+2. Runs application/release tests, source checks, Helm lint/render, infrastructure validation and strict Kubernetes schema checks.
+3. Builds native ARM64 frontend and backend images with unique `sha-<commit>-build-<number>` tags.
+4. Loads those images into every node of `production-demo`.
+5. Updates chart image references, chart version `0.2.<build-number>` and `appVersion` in the workspace.
+6. Archives the Helm `.tgz`, non-sensitive release `values.yaml` and image-ID provenance manifest.
+7. Deploys that exact package using the namespaced deployer credential, waits for rollouts and checks the API through Traefik.
 
-1. Prepare a **runner-reachable** Kubernetes cluster with an enforcing CNI and Traefik IngressClass `traefik`. GitHub-hosted runners cannot reach a kind cluster on your laptop; use a reachable cloud/test cluster or adapt `runs-on` to a dedicated trusted runner with cluster access.
-2. As an administrator, create the `demo` namespace, the `demo-app` Secret with key `signing-key`, and the TLS Secret `demo-tls`. Install Traefik in namespace `ingress` or adjust `networkPolicy.ingressNamespace`. Application charts do not create cluster prerequisites.
-3. Set your actual DNS host in `environments/production/values.yaml`. Supply a matching certificate through `demo-tls` and route DNS to your ingress controller. Production values accept HTTPS only; the HTTP override is local-demo-only.
-4. Apply `infrastructure/deployer-rbac.yaml` on the target cluster as an administrator. Configure a dedicated kubeconfig using that service account or equivalent namespaced deployment identity. The Role cannot list all Secrets or create cluster-scoped resources; deployment privileges are still trusted because they can change application workloads.
-5. Create a GitHub environment named `production`, restrict it to `main`, and configure approval rules as appropriate. Add environment secret `KUBE_CONFIG_DATA`: base64-encoded contents of the dedicated deployment kubeconfig. Upload it through your approved secret-management process; never commit or print it. Use renewable/short-lived credentials where possible, and ensure any kubeconfig authentication plugin is available on the runner.
-6. Set **repository variable** `ENABLE_DEPLOYMENT` to `true`. Leave it unset to publish artifacts only.
+The pipeline uses `imagePullPolicy: Never` and the local HTTP overlay. It needs no registry credentials and does not publish images or charts to GHCR. Its packaged release is intended only for nodes where those exact local images have been loaded. It does not commit generated release versions back to Git. Previous GitHub-published artifacts remain unchanged.
 
-The deployment job uses `HELM_DRIVER=configmap` so Helm release metadata does not require broad Secret read/write access. Keep that driver when inspecting, upgrading or rolling back CI-managed releases. Kubeconfig is written with mode 0600 and removed after the job. The deployment refuses stale source revisions if `main` moved during the build or approval wait; dispatch a new workflow on the latest revision.
+Concurrent builds are disabled, builds time out after 30 minutes, and only the latest 15 build logs/10 artifact sets are retained. To trigger a build manually:
 
-Do not point deployment credentials at an unrelated cluster. Local bootstrap uses NodePort on loopback-mapped ports; cloud ingress exposure and certificates must be configured for the target provider.
+```bash
+python3 scripts/jenkins-client.py build
+python3 scripts/jenkins-client.py status
+```
+
+### Deployment credentials and renewal
+
+`jenkins-setup.sh` applies `infrastructure/deployer-rbac.yaml` and creates a **24-hour** TokenRequest credential. Its kubeconfig includes only that identity, the public cluster CA and `https://production-demo-control-plane:6443`, whose certificate hostname is verified. The administrator kubeconfig is never mounted into Jenkins. Jenkins Credentials stores this as the `kind-deployer` file credential, bound only in the deployment stage.
+
+The deployer can manage namespaced application resources but cannot list all Secrets, read nodes or create cluster roles. Helm uses `HELM_DRIVER=configmap`, avoiding broad Secret storage permissions. Existing application resources are adopted under the same release name; old Secret-backed local Helm history is preserved. `deploy-local.sh` refuses to overwrite a ConfigMap-backed CI-managed release.
+
+Renew before expiry, and after recreating the kind cluster:
+
+```bash
+bash scripts/jenkins-refresh-credentials.sh
+```
+
+This refreshes the protected kubeconfig and reloads Jenkins configuration without printing tokens. Expiry metadata is stored in `~/.local/share/kubernetes-production-demo/jenkins/credential-expiry`. Use the same `HELM_DRIVER=configmap` when inspecting or rolling back the Jenkins-managed release.
+
+### Trust boundary and lifecycle
+
+**The agent's Docker socket grants powerful Docker-daemon access and can bypass Kubernetes RBAC.** The agent is not a safe place to run untrusted code. Permit only trusted maintainers to change `main`, Jenkins configuration or the Jenkinsfile. Do not enable arbitrary PR builds. Neither container mounts your home directory or administrator kubeconfig. The agent's bootstrap volume contains only its host key, authorized public key and public GitHub host keys—not the controller admin password or checkout private key.
+
+Keep the Mac awake and Docker Desktop running for polling and deployment. Jenkins uses persistent named volumes, with `restart: unless-stopped`. Stop or start it without removing volumes:
+
+```bash
+docker compose -f jenkins/compose.yaml stop
+docker compose -f jenkins/compose.yaml start
+```
+
+If the Docker CLI is not on PATH, use `/Applications/Docker.app/Contents/Resources/bin/docker`. Back up Jenkins home and protected local state securely; they contain sensitive material. Do not archive them in builds. Decommission by stopping Jenkins, removing its read-only GitHub deploy key, and deleting the `demo-deployer` ServiceAccount/Role/RoleBinding to revoke cluster access. Remove volumes/state only after a deliberate backup/data-retention decision.
 
 ## Validation without a cluster
 

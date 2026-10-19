@@ -3,6 +3,10 @@ set -euo pipefail
 source "$(dirname "$0")/common.sh"
 require docker kind kubectl helm python3
 assert_cluster
+if test -n "$(k -n demo get configmaps -l owner=helm,name=demo -o name)"; then
+  printf 'Jenkins manages this release. Use the Jenkins job instead of local Helm.\n' >&2
+  exit 1
+fi
 for component in backend frontend; do
   docker build -t "demo/$component:local" "$ROOT/apps/$component"
   kind load docker-image "demo/$component:local" --name production-demo

@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+import re
 import unittest
 import yaml
 
@@ -20,26 +21,26 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(local["frontend"]["image"]["pullPolicy"], "Never")
         self.assertEqual(local["backend"]["image"]["pullPolicy"], "Never")
 
-    def test_workflow_limits_credentials_to_optional_deployment(self):
-        # BaseLoader preserves GitHub's YAML 1.2 `on` key as text.
-        workflow = yaml.load((ROOT / ".github/workflows/ci-cd.yaml").read_text(), Loader=yaml.BaseLoader)
-        self.assertIn("on", workflow)
-        self.assertIn("pull_request", workflow["jobs"]["build"]["if"])
-        self.assertEqual(workflow["permissions"]["contents"], "read")
-        self.assertEqual(workflow["jobs"]["release"]["permissions"]["contents"], "read")
-        self.assertIn("ENABLE_DEPLOYMENT", workflow["jobs"]["deploy"]["if"])
-        self.assertEqual(workflow["jobs"]["deploy"]["environment"], "production")
-        for name in ("validate", "build", "release"):
-            self.assertNotIn("KUBE_CONFIG_DATA", yaml.safe_dump(workflow["jobs"][name]))
+    def test_controller_has_authentication_and_no_build_executors(self):
+        config = yaml.safe_load((ROOT / "jenkins/controller/jenkins.yaml").read_text())
+        self.assertEqual(config["jenkins"]["numExecutors"], 0)
+        self.assertFalse(config["jenkins"]["securityRealm"]["local"]["allowsSignup"])
+        self.assertFalse(config["jenkins"]["authorizationStrategy"]["loggedInUsersCanDoAnything"]["allowAnonymousRead"])
+        compose = yaml.safe_load((ROOT / "jenkins/compose.yaml").read_text())
+        self.assertEqual(compose["services"]["controller"]["ports"], ["127.0.0.1:8090:8080"])
+        self.assertNotIn("/var/run/docker.sock", str(compose["services"]["controller"]["volumes"]))
+        self.assertIn("agent-secrets:/opt/agent-secrets:ro", compose["services"]["agent"]["volumes"])
+        self.assertNotIn("bootstrap-secrets:/run/secrets:ro", compose["services"]["agent"]["volumes"])
 
-    def test_workflow_shell_syntax(self):
-        workflow = yaml.load((ROOT / ".github/workflows/ci-cd.yaml").read_text(), Loader=yaml.BaseLoader)
-        for name, job in workflow["jobs"].items():
-            for step in job["steps"]:
-                if "run" in step:
-                    with self.subTest(job=name, step=step.get("name", step["run"][:40])):
-                        result = subprocess.run(["bash", "-n"], input=step["run"], text=True, capture_output=True)
-                        self.assertEqual(result.returncode, 0, result.stderr)
+    def test_pipeline_security_and_shell_syntax(self):
+        pipeline = (ROOT / "Jenkinsfile").read_text()
+        self.assertIn("pollSCM('H/2 * * * *')", pipeline)
+        self.assertIn("disableConcurrentBuilds()", pipeline)
+        self.assertIn("file(credentialsId: 'kind-deployer'", pipeline)
+        self.assertIn("--atomic --wait", pipeline)
+        for script in re.findall(r"sh '''(.*?)'''", pipeline, flags=re.S):
+            result = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_deployer_cannot_list_or_write_application_secrets(self):
         documents = list(yaml.safe_load_all((ROOT / "infrastructure/deployer-rbac.yaml").read_text()))

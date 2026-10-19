@@ -8,6 +8,7 @@ for file in "$ROOT"/apps/backend/*.js "$ROOT"/apps/frontend/*.js "$ROOT"/apps/fr
   node --check "$file"
 done
 for file in "$ROOT"/scripts/*.sh; do bash -n "$file"; done
+bash -n "$ROOT/jenkins/agent/entrypoint.sh"
 python3 - "$ROOT" <<'PY'
 from pathlib import Path
 import ast
@@ -27,7 +28,7 @@ for path in root.rglob("*"):
 print("Source, JSON and static YAML syntax checks passed")
 PY
 python3 -m unittest discover -s "$ROOT/tests" -p 'test_*.py'
-for environment in local production; do
+for environment in local production jenkins; do
   helm lint "$ROOT/charts/webapp" --strict -f "$ROOT/environments/$environment/values.yaml"
   helm template demo "$ROOT/charts/webapp" --namespace demo --kube-version 1.34.0 \
     -f "$ROOT/environments/$environment/values.yaml" > "$ROOT/.artifacts/$environment.yaml"

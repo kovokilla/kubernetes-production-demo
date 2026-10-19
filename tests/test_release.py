@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -15,40 +16,40 @@ class ReleaseTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        for relative in ("environments/production/values.yaml", "charts/webapp/Chart.yaml", "charts/webapp/values.yaml"):
+        for relative in ("environments/jenkins/values.yaml", "charts/webapp/Chart.yaml", "charts/webapp/values.yaml"):
             target = self.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text((ROOT / relative).read_text())
-        for component in ("frontend", "backend"):
-            (self.root / f"{component}.digest").write_text("sha256:" + "a" * 64)
+        self.ids = {name: "sha256:" + "a" * 64 for name in ("frontend", "backend")}
 
-    def test_release_preserves_tls_and_pins_both_digests(self):
-        release.update_release(self.root, "Example/Project", "b" * 40, "42", self.root)
-        values = yaml.safe_load((self.root / "environments/production/values.yaml").read_text())
+    def test_release_packages_both_unique_local_images(self):
+        release.update_release(self.root, "b" * 40, "42", self.ids)
+        values = yaml.safe_load((self.root / ".artifacts/release/values.yaml").read_text())
         chart = yaml.safe_load((self.root / "charts/webapp/Chart.yaml").read_text())
         defaults = yaml.safe_load((self.root / "charts/webapp/values.yaml").read_text())
-        self.assertTrue(values["ingress"]["tls"]["enabled"])
-        self.assertEqual(chart["version"], "0.1.42")
+        self.assertFalse(values["ingress"]["tls"]["enabled"])
+        self.assertEqual(chart["version"], "0.2.42")
         self.assertEqual(chart["appVersion"], "b" * 40)
         for component in ("frontend", "backend"):
-            self.assertEqual(values[component]["image"]["repository"], f"ghcr.io/example/project/{component}")
-            self.assertEqual(values[component]["image"]["digest"], "sha256:" + "a" * 64)
-            self.assertEqual(defaults[component]["image"]["digest"], "sha256:" + "a" * 64)
-            self.assertEqual(defaults[component]["image"]["pullPolicy"], "IfNotPresent")
+            self.assertEqual(values[component]["image"]["repository"], f"demo/{component}")
+            self.assertEqual(values[component]["image"]["tag"], "sha-" + "b" * 40 + "-build-42")
+            self.assertEqual(defaults[component]["image"]["digest"], "")
+            self.assertEqual(defaults[component]["image"]["pullPolicy"], "Never")
+        images = json.loads((self.root / ".artifacts/release/images.json").read_text())
+        self.assertEqual(images["imageIds"], self.ids)
 
-    def test_invalid_digest_does_not_change_files(self):
-        target = self.root / "environments/production/values.yaml"
+    def test_invalid_image_id_does_not_change_files(self):
+        target = self.root / "charts/webapp/values.yaml"
         original = target.read_text()
-        (self.root / "backend.digest").write_text("not-a-digest")
+        self.ids["backend"] = "not-an-image"
         with self.assertRaises(ValueError):
-            release.update_release(self.root, "owner/repo", "b" * 40, "42", self.root)
+            release.update_release(self.root, "b" * 40, "42", self.ids)
         self.assertEqual(target.read_text(), original)
 
     def test_rejects_invalid_release_parameters(self):
-        for repository, sha, number in [
-            ("bad", "b" * 40, "42"),
-            ("owner/repo", "short", "42"),
-            ("owner/repo", "b" * 40, "0"),
+        for sha, number in [
+            ("short", "42"),
+            ("b" * 40, "0"),
         ]:
             with self.assertRaises(ValueError):
-                release.update_release(self.root, repository, sha, number, self.root)
+                release.update_release(self.root, sha, number, self.ids)
