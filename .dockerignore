@@ -13,3 +13,4 @@
 **/*.crt
 **/*.kubeconfig
 **/kubeconfig
+**/_README.private.md
