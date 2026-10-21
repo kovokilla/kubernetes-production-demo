@@ -1,6 +1,54 @@
 fullnameOverride: monitoring
 grafana:
-  enabled: false
+  enabled: true
+  fullnameOverride: monitoring-grafana
+  defaultDashboardsEnabled: false
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: false
+  deploymentStrategy:
+    type: Recreate
+  persistence:
+    enabled: true
+    type: pvc
+    storageClassName: standard
+    accessModes: [ReadWriteOnce]
+    size: 1Gi
+  resources:
+    requests: { cpu: 25m, memory: 192Mi }
+    limits: { cpu: 500m, memory: 768Mi }
+  env:
+    GOMEMLIMIT: 512MiB
+  rbac:
+    namespaced: true
+  grafana.ini:
+    auth.anonymous:
+      enabled: false
+    users:
+      allow_sign_up: false
+  sidecar:
+    resources:
+      requests: { cpu: 5m, memory: 32Mi }
+      limits: { cpu: 100m, memory: 128Mi }
+    dashboards:
+      enabled: true
+      searchNamespace: monitoring
+      label: grafana_dashboard
+      labelValue: "1"
+      provider:
+        folder: Production demo
+        allowUiUpdates: false
+    datasources:
+      enabled: true
+      uid: prometheus
+      searchNamespace: monitoring
+      alertmanager:
+        enabled: false
 defaultRules:
   create: false
 prometheus:

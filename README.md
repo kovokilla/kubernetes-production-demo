@@ -1,6 +1,6 @@
 # Kubernetes application demo
 
-Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap and Secret configuration, RBAC, NetworkPolicy, Jenkins CI/CD, and Prometheus/Alertmanager monitoring.
+Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap and Secret configuration, RBAC, NetworkPolicy, Jenkins CI/CD, and Prometheus/Alertmanager/Grafana monitoring.
 
 **Application:** http://demo.localhost:8080 · **Jenkins:** http://127.0.0.1:8090 · **Job:** `production-demo`
 
@@ -12,6 +12,7 @@ Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap a
 - [Public-release checklist](#public-release-checklist)
 - [Jenkins CI/CD](#jenkins-cicd)
 - [Prometheus and Alertmanager](#prometheus-and-alertmanager)
+- [Grafana dashboard](#grafana-dashboard)
 - [Validation without a cluster](#validation-without-a-cluster)
 - [Operations and troubleshooting](#operations-and-troubleshooting)
 - [Cleanup](#cleanup)
@@ -132,7 +133,7 @@ Before an explicitly authorized visibility change:
 
 GitHub can reject branch-protection/ruleset configuration for a private repository on a plan that does not support it. Do not silently substitute weaker protections or change visibility to bypass that decision; keep the repository private until the owner explicitly authorizes the next publication step.
 
-The shared local HTTP client and Jenkins helper bind credentials to the configured loopback scheme/host/port, reject unsafe redirects and disable environment proxies. Same-origin redirects continue to work. This does not authenticate an unknown process listening on localhost; prefer helper-owned port-forwards and do not send local admin credentials to an untrusted listener.
+The Jenkins/Grafana HTTP helpers now bind credentials to the configured loopback scheme/host/port, reject unsafe redirects and disable environment proxies. Same-origin redirects continue to work. This does not authenticate an unknown process listening on localhost; prefer helper-owned port-forwards and do not send local admin credentials to an untrusted listener.
 
 ## Jenkins CI/CD
 
@@ -209,13 +210,13 @@ bash scripts/monitoring-setup.sh
 python3 scripts/monitoring-verify.py
 ```
 
-The setup requires your administrator workstation context, not the restricted Jenkins credential. It installs pinned `kube-prometheus-stack` 92.10.1, `prometheus-blackbox-exporter` 11.20.0 and the local `monitoring-resources` chart into namespace `monitoring`. Grafana and kind-unreachable control-plane collectors are deliberately disabled. Application default-deny NetworkPolicies remain unchanged.
+The setup requires your administrator workstation context, not the restricted Jenkins credential. It installs pinned `kube-prometheus-stack` 92.10.1 (including Grafana), `prometheus-blackbox-exporter` 11.20.0 and the local `monitoring-resources` chart into namespace `monitoring`. Bundled Grafana dashboards and kind-unreachable control-plane collectors are disabled; one project-specific dashboard is provisioned instead. Application default-deny NetworkPolicies remain unchanged.
 
-Prometheus scrapes/evaluates every 30 seconds, retains up to 24 hours of samples with a 512 MB size limit and uses a 2 Gi local-path PVC. Alertmanager has a 256 Mi PVC for its local state. Explicit resource requests/limits keep the stack small; Prometheus itself is limited to 768 Mi RAM. Allow roughly 1–1.5 Gi additional Docker memory headroom including transient startup/build usage. PVC data survives pod restarts but not deletion of the kind cluster.
+Prometheus scrapes/evaluates every 30 seconds, retains up to 24 hours of samples with a 512 MB size limit and uses a 2 Gi local-path PVC. Alertmanager has a 256 Mi PVC for its local state; Grafana has a separate 1 Gi PVC. Explicit resource requests/limits keep the stack bounded: Prometheus and Grafana are each limited to 768 Mi RAM, and each Grafana provisioning sidecar to 128 Mi. Grafana uses a 512 MiB Go soft-memory target, leaving headroom for browser asset/query workloads. Allow roughly 2–3 Gi additional Docker memory headroom for the monitoring stack, with extra headroom for image builds. PVC data survives pod restarts but not deletion of the kind cluster.
 
 ### Private UI access
 
-Both UIs are ClusterIP-only; no public ingress or always-running host port is created. Start these foreground port-forwards in **separate terminals**, then open the corresponding URL:
+All three UIs are ClusterIP-only; no public ingress or always-running host port is created. Start these foreground port-forwards in **separate terminals**, then open the corresponding URL:
 
 ```bash
 .tools/kubectl --context kind-production-demo -n monitoring port-forward --address 127.0.0.1 service/monitoring-prometheus 9090:9090
@@ -228,6 +229,43 @@ Prometheus: **http://127.0.0.1:9090** — inspect targets, rules, alerts and met
 ```
 
 Alertmanager: **http://127.0.0.1:9093** — inspect grouped alerts and silences. Stop each port-forward with Ctrl+C when finished.
+
+### Grafana dashboard
+
+Start Grafana's loopback-only port-forward from the repository root:
+
+```bash
+.tools/kubectl --context kind-production-demo -n monitoring port-forward --address 127.0.0.1 service/monitoring-grafana 3000:80
+```
+
+Open **http://127.0.0.1:3000**. Log in as **admin**, using the separately generated password in `~/.local/share/kubernetes-production-demo/grafana/admin_password`. The directory is mode 0700 and the file mode 0600; import the password securely into your password manager rather than printing it into shared logs or chat. `scripts/grafana-credentials.py` creates the `grafana-admin` Kubernetes Secret through stdin and preserves existing credentials on subsequent setup runs.
+
+Open **Production demo → Application & Jenkins Overview**, or go directly to **http://127.0.0.1:3000/d/production-demo-overview** after login.
+
+The eight metric panels show:
+
+1. End-to-end application API availability.
+2. Jenkins controller HTTP availability.
+3. Jenkins agent SSH availability, not Jenkins connection state.
+4. Restricted deployment credential hours remaining; negative means expired.
+5. Desired versus available frontend/backend replicas.
+6. Application-container restarts over the preceding 15 minutes.
+7. Blackbox probe duration, not end-user latency percentiles.
+8. Currently firing application/Jenkins/monitoring alerts.
+
+The existing Prometheus datasource uses UID `prometheus`; no new application instrumentation or extra datasource credentials are required. Dashboard JSON is in `charts/monitoring-resources/files/dashboard.json` and is delivered through a labelled ConfigMap. Datasource/dashboard sidecars watch only namespace `monitoring` with namespaced RBAC. Anonymous access and sign-up are disabled.
+
+The dashboard is provisioned read-only and refreshes every 30 seconds. To change the managed dashboard, edit its JSON and re-run monitoring setup; use a separate UI copy for experiments. Grafana stores its local SQLite settings/user state on the PVC, not the Prometheus time series. A single-instance Recreate strategy avoids overlapping Grafana processes on that local database.
+
+Verify login protection, provisioning, datasource health and all panel queries without printing the password:
+
+```bash
+python3 scripts/grafana-verify.py
+```
+
+To verify the same local connection used by your browser, keep its port-forward running and use `python3 scripts/grafana-verify.py --url http://127.0.0.1:3000`. Verification checks browser JS/CSS assets, built-in time-series metadata and the actual `POST /api/ds/query` path, in addition to datasource health and proxy queries.
+
+Changing the Secret alone is not a supported password-rotation procedure for an existing Grafana database. Use Grafana's documented administration/reset procedure and keep the protected local credential and Secret consistent. Do not delete the PVC merely to reset a password.
 
 ### Monitored paths and alerts
 
@@ -315,6 +353,7 @@ HELM_DRIVER=configmap .tools/helm --kube-context kind-production-demo -n demo hi
 - **Missing local image:** use the full Jenkins build to preload every node. An archived chart alone cannot fetch these `Never`-pull images.
 - **App name does not resolve:** use the explicit Host-header curl command above. Check that ports 8080, 8443 and 8090 are not claimed by another service.
 - **Jenkins is still starting or an agent is offline:** inspect service status with `docker compose -f jenkins/compose.yaml ps`. Controller/plugin downloads and SSH startup can take time. Do not paste raw credential files or unreviewed logs into issue reports.
+- **Grafana page opens but shows “Failed to fetch” or panel-loading errors:** check that port 3000 is still forwarded and the Grafana container has not restarted/OOM-killed. A restart can drop the tunnel while leaving the old page visible. Re-establish the forward and hard-refresh the browser; inspect current memory/restart state before raising limits further.
 
 Use `python3 scripts/jenkins-client.py log 3` to inspect a specific build; substitute the required build number. The helper masks known local credentials, but review logs before sharing them.
 

@@ -32,6 +32,17 @@ for path in sorted((root / ".artifacts").glob("infra-*.yaml")):
         assert prometheus["spec"]["resources"]["limits"]["memory"] == "768Mi"
         services = {doc["metadata"]["name"] for doc in documents if doc["kind"] == "Service"}
         assert {"monitoring-prometheus", "monitoring-alertmanager"} <= services
+        assert "monitoring-grafana" in services
+        grafana = next(doc for doc in documents if doc["kind"] == "Deployment"
+                       and doc["metadata"]["name"] == "monitoring-grafana")
+        assert grafana["spec"]["strategy"]["type"] == "Recreate"
+        roles = {doc["metadata"]["name"] for doc in documents if doc["kind"] == "Role"}
+        assert "monitoring-grafana" in roles
+        assert not any(doc["kind"] == "ClusterRole" and "grafana" in doc["metadata"]["name"] for doc in documents)
+        env = next(container["env"] for container in grafana["spec"]["template"]["spec"]["containers"]
+                   if container["name"] == "grafana")
+        password = next(item for item in env if item["name"] == "GF_SECURITY_ADMIN_PASSWORD")
+        assert password["valueFrom"]["secretKeyRef"]["name"] == "grafana-admin"
     if path.name == "infra-traefik.yaml":
         service = next(doc for doc in documents if doc["kind"] == "Service" and doc["metadata"]["name"] == "traefik")
         assert service["spec"]["type"] == "NodePort"

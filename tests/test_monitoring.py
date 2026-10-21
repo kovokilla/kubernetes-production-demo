@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import unittest
 import yaml
 
@@ -6,9 +7,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class MonitoringTests(unittest.TestCase):
+    def test_grafana_has_no_unscoped_authenticated_opener(self):
+        source = (ROOT / "scripts/grafana-verify.py").read_text()
+        self.assertIn('LocalHTTPClient(url, username="admin", password=password)', source)
+        self.assertNotIn("urllib.request.urlopen(", source)
+
     def test_small_stack_and_real_local_receiver(self):
         values = yaml.safe_load((ROOT / "infrastructure/monitoring-values.yaml").read_text())
-        self.assertFalse(values["grafana"]["enabled"])
+        self.assertTrue(values["grafana"]["enabled"])
         self.assertFalse(values["defaultRules"]["create"])
         self.assertFalse(values["prometheusOperator"]["admissionWebhooks"]["enabled"])
         self.assertFalse(values["prometheusOperator"]["tls"]["enabled"])
@@ -43,3 +49,38 @@ class MonitoringTests(unittest.TestCase):
         source = (ROOT / "scripts/monitoring-sync-targets.py").read_text()
         self.assertIn('jenkins/credential-expiry"', source)
         self.assertNotIn('STATE / "kubeconfig"', source)
+
+    def test_grafana_is_private_bounded_and_secret_backed(self):
+        values = yaml.safe_load((ROOT / "infrastructure/monitoring-values.yaml").read_text())["grafana"]
+        self.assertFalse(values["defaultDashboardsEnabled"])
+        self.assertEqual(values["admin"]["existingSecret"], "grafana-admin")
+        self.assertEqual(values["service"]["type"], "ClusterIP")
+        self.assertFalse(values["ingress"]["enabled"])
+        self.assertFalse(values["grafana.ini"]["auth.anonymous"]["enabled"])
+        self.assertFalse(values["grafana.ini"]["users"]["allow_sign_up"])
+        self.assertTrue(values["rbac"]["namespaced"])
+        self.assertEqual(values["persistence"]["size"], "1Gi")
+        self.assertEqual(values["deploymentStrategy"]["type"], "Recreate")
+        self.assertEqual(values["sidecar"]["resources"]["limits"]["memory"], "128Mi")
+        self.assertEqual(values["resources"]["limits"]["memory"], "768Mi")
+        self.assertEqual(values["env"]["GOMEMLIMIT"], "512MiB")
+        for kind in ("dashboards", "datasources"):
+            self.assertEqual(values["sidecar"][kind]["searchNamespace"], "monitoring")
+
+    def test_dashboard_uses_existing_datasource_and_core_panels(self):
+        dashboard = json.loads((ROOT / "charts/monitoring-resources/files/dashboard.json").read_text())
+        self.assertEqual(dashboard["uid"], "production-demo-overview")
+        self.assertFalse(dashboard["editable"])
+        self.assertEqual(len(dashboard["panels"]), 8)
+        self.assertEqual(len({panel["id"] for panel in dashboard["panels"]}), 8)
+        queries = []
+        for panel in dashboard["panels"]:
+            self.assertIn(panel["type"], ["stat", "timeseries"])
+            self.assertEqual(panel["datasource"]["uid"], "prometheus")
+            queries.extend(target["expr"] for target in panel["targets"])
+        combined = " ".join(queries)
+        for metric in ("probe_success", "probe_duration_seconds", "kube_deployment_spec_replicas",
+                       "kube_pod_container_status_restarts_total",
+                       "jenkins_deployer_credential_expiry_timestamp_seconds"):
+            self.assertIn(metric, combined)
+        self.assertNotIn("jenkins_job", combined)
