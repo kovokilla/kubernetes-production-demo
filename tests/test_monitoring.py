@@ -71,11 +71,14 @@ class MonitoringTests(unittest.TestCase):
         dashboard = json.loads((ROOT / "charts/monitoring-resources/files/dashboard.json").read_text())
         self.assertEqual(dashboard["uid"], "production-demo-overview")
         self.assertFalse(dashboard["editable"])
-        self.assertEqual(len(dashboard["panels"]), 8)
-        self.assertEqual(len({panel["id"] for panel in dashboard["panels"]}), 8)
+        self.assertEqual(len(dashboard["panels"]), 13)
+        self.assertEqual(len({panel["id"] for panel in dashboard["panels"]}), 13)
         queries = []
         for panel in dashboard["panels"]:
-            self.assertIn(panel["type"], ["stat", "timeseries"])
+            self.assertIn(panel["type"], ["stat", "timeseries", "text"])
+            if panel["type"] == "text":
+                self.assertIn("Do not sum", panel["options"]["content"])
+                continue
             self.assertEqual(panel["datasource"]["uid"], "prometheus")
             queries.extend(target["expr"] for target in panel["targets"])
         combined = " ".join(queries)
@@ -84,3 +87,19 @@ class MonitoringTests(unittest.TestCase):
                        "jenkins_deployer_credential_expiry_timestamp_seconds"):
             self.assertIn(metric, combined)
         self.assertNotIn("jenkins_job", combined)
+
+    def test_node_panels_have_readable_labels_and_shared_vm_warning(self):
+        dashboard = json.loads((ROOT / "charts/monitoring-resources/files/dashboard.json").read_text())
+        panels = {panel["id"]: panel for panel in dashboard["panels"]}
+        self.assertIn("same underlying", panels[9]["options"]["content"])
+        self.assertIn('condition="Ready"', panels[10]["targets"][0]["expr"])
+        health = panels[11]["targets"][0]["expr"]
+        self.assertIn("kube_pod_info", health)
+        self.assertNotIn("node_uname_info", health)
+        for identity in (10, 11):
+            self.assertEqual(panels[identity]["targets"][0]["legendFormat"], "{{node}}")
+            self.assertEqual(panels[identity]["fieldConfig"]["defaults"]["noValue"], "Unknown / missing")
+        for identity in (12, 13):
+            self.assertEqual(panels[identity]["targets"][0]["legendFormat"], "{{nodename}}")
+            self.assertEqual(panels[identity]["fieldConfig"]["defaults"]["unit"], "percent")
+            self.assertEqual(panels[identity]["fieldConfig"]["defaults"]["max"], 100)

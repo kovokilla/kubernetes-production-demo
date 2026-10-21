@@ -1,10 +1,10 @@
 {
   "uid": "production-demo-overview",
   "title": "Application & Jenkins Overview",
-  "description": "Local kind application, Jenkins availability and deployment-credential overview. SSH availability is not Jenkins connection state; no build-result or Warp billing metrics are collected.",
+  "description": "Application, Jenkins and kind node overview. Node-exporter CPU/memory reflect a shared Docker Desktop VM, not independent machines. SSH availability is not Jenkins connection state; no build-result or Warp billing metrics are collected.",
   "tags": ["kubernetes", "jenkins", "demo"],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "timezone": "browser",
   "refresh": "30s",
@@ -132,6 +132,87 @@
         "overrides": []
       },
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "id": 9,
+      "type": "text",
+      "title": "Nodes — kind shares one Docker Desktop VM",
+      "gridPos": { "x": 0, "y": 21, "w": 24, "h": 4 },
+      "options": {
+        "mode": "markdown",
+        "content": "CPU and memory below are node-exporter views of the **same underlying Docker Desktop Linux VM**. Similar values are expected. **Do not sum them as three independent machines or interpret them as each kind container's resource budget.** Node readiness is Kubernetes status; exporter health only means metrics can be scraped. Missing data is not zero usage."
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Kubernetes node readiness",
+      "description": "Ready=true is 1. NotReady or Unknown is 0. A deleted/missing node is not automatically replaced with a healthy value.",
+      "gridPos": { "x": 0, "y": 25, "w": 12, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max by (node) (kube_node_status_condition{condition=\"Ready\",status=\"true\"})", "legendFormat": "{{node}}", "instant": true }],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown / missing",
+          "mappings": [{ "type": "value", "options": { "0": { "text": "NOT READY", "color": "red" }, "1": { "text": "READY", "color": "green" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Node-exporter scrape health",
+      "description": "Joins target/pod metadata so a failed exporter can retain its node label. This is scrape reachability, not Kubernetes readiness.",
+      "gridPos": { "x": 12, "y": 25, "w": 12, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{
+        "refId": "A",
+        "expr": "max by (node) (up{namespace=\"monitoring\",service=\"monitoring-prometheus-node-exporter\"} * on (namespace, pod) group_left (node) max by (namespace, pod, node) (kube_pod_info{namespace=\"monitoring\",pod=~\"monitoring-prometheus-node-exporter-.*\"}))",
+        "legendFormat": "{{node}}",
+        "instant": true
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Unknown / missing",
+          "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Node CPU usage % — shared VM view",
+      "description": "Five-minute non-idle CPU percentage averaged across cores. kind nodes share the VM kernel; do not add these series together.",
+      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{
+        "refId": "A",
+        "expr": "(100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{service=\"monitoring-prometheus-node-exporter\",mode=\"idle\"}[5m])))) * on (instance) group_left (nodename) max by (instance, nodename) (node_uname_info{service=\"monitoring-prometheus-node-exporter\"})",
+        "legendFormat": "{{nodename}}"
+      }],
+      "fieldConfig": { "defaults": { "min": 0, "max": 100, "decimals": 1, "unit": "percent" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Node memory usage % — shared VM view",
+      "description": "100 × (1 - available / total memory), using MemAvailable rather than treating all cache as unavailable. This is the shared Linux VM view.",
+      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{
+        "refId": "A",
+        "expr": "(100 * (1 - node_memory_MemAvailable_bytes{service=\"monitoring-prometheus-node-exporter\"} / node_memory_MemTotal_bytes{service=\"monitoring-prometheus-node-exporter\"})) * on (instance) group_left (nodename) max by (instance, nodename) (node_uname_info{service=\"monitoring-prometheus-node-exporter\"})",
+        "legendFormat": "{{nodename}}"
+      }],
+      "fieldConfig": { "defaults": { "min": 0, "max": 100, "decimals": 1, "unit": "percent" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     }
   ]
 }

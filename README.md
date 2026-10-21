@@ -242,7 +242,7 @@ Open **http://127.0.0.1:3000**. Log in as **admin**, using the separately genera
 
 Open **Production demo → Application & Jenkins Overview**, or go directly to **http://127.0.0.1:3000/d/production-demo-overview** after login.
 
-The eight metric panels show:
+The twelve metric panels show:
 
 1. End-to-end application API availability.
 2. Jenkins controller HTTP availability.
@@ -252,6 +252,14 @@ The eight metric panels show:
 6. Application-container restarts over the preceding 15 minutes.
 7. Blackbox probe duration, not end-user latency percentiles.
 8. Currently firing application/Jenkins/monitoring alerts.
+9. Kubernetes node readiness for each node.
+10. Node-exporter scrape health for each node.
+11. Five-minute CPU usage percentage with readable node names.
+12. Memory usage percentage based on available versus total memory.
+
+A separate **Nodes** notice explains the kind limitation: the three nodes share one Docker Desktop Linux VM. Their node-exporter CPU/memory readings can be nearly identical and must not be summed as three independent machines or mistaken for per-container resource allocations. Readiness and scrape health are separate signals; missing metrics are shown as unknown, not zero usage or UP.
+
+The exporter-health panel derives node names from Kubernetes pod metadata, rather than requiring the exporter to return its own identity metric while down. CPU/memory legends use `node_uname_info` to replace IP addresses with node names. These panels add visualization only; no new exporters or node alerts are installed.
 
 The existing Prometheus datasource uses UID `prometheus`; no new application instrumentation or extra datasource credentials are required. Dashboard JSON is in `charts/monitoring-resources/files/dashboard.json` and is delivered through a labelled ConfigMap. Datasource/dashboard sidecars watch only namespace `monitoring` with namespaced RBAC. Anonymous access and sign-up are disabled.
 

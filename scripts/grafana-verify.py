@@ -94,9 +94,10 @@ def main(base_url=None):
             raise RuntimeError("Grafana cannot reach the Prometheus datasource")
         panels = dashboard["dashboard"]["panels"]
         metric_panels = [panel for panel in panels if panel.get("targets")]
-        if len(metric_panels) != 8:
-            raise RuntimeError("Expected eight provisioned metric panels")
+        if len(metric_panels) != 12:
+            raise RuntimeError("Expected twelve provisioned metric panels and the kind notice")
         count = 0
+        node_names = None
         for panel in metric_panels:
             browser_queries = []
             for target in panel.get("targets", []):
@@ -104,6 +105,27 @@ def main(base_url=None):
                              urllib.parse.urlencode({"query": target["expr"]}))
                 if result.get("status") != "success" or not result["data"]["result"]:
                     raise RuntimeError(f"No data or query error in panel: {panel['title']}")
+                if panel["id"] in (10, 11, 12, 13):
+                    label = "node" if panel["id"] in (10, 11) else "nodename"
+                    names = {item["metric"].get(label) for item in result["data"]["result"]}
+                    if None in names:
+                        raise RuntimeError(f"Readable node labels are missing in panel: {panel['title']}")
+                    if panel["id"] == 10:
+                        node_names = names
+                    elif names != node_names:
+                        raise RuntimeError(f"Node series do not match readiness data: {panel['title']}")
+                    print(f"Node labels OK: {', '.join(sorted(names))}")
+                    if panel["id"] == 11:
+                        selector = 'up{namespace="monitoring",service="monitoring-prometheus-node-exporter"}'
+                        down_expr = target["expr"].replace(selector, f"(0 * {selector})")
+                        simulated = api("/api/datasources/proxy/uid/prometheus/api/v1/query?" +
+                                        urllib.parse.urlencode({"query": down_expr}))
+                        samples = simulated["data"]["result"]
+                        if {sample["metric"].get("node") for sample in samples} != node_names or any(
+                            float(sample["value"][1]) != 0 for sample in samples
+                        ):
+                            raise RuntimeError("Exporter-DOWN simulation lost node labels or failed to show zero")
+                        print("Simulated exporter DOWN retains readable node labels; no exporter was stopped")
                 browser_queries.append({
                     **target, "datasource": panel["datasource"], "format": "time_series",
                     "range": not target.get("instant", False),
@@ -119,7 +141,7 @@ def main(base_url=None):
                 if result.get("error") or not result.get("frames"):
                     raise RuntimeError(f"Browser query failed in panel: {panel['title']}")
             print(f"Panel query OK: {panel['title']}")
-        print(f"Grafana verified: login required, browser assets available, {len(metric_panels)} metric panels and {count} GET/POST queries working")
+        print(f"Grafana verified: login required, browser assets available, {len(metric_panels)} metric panels, kind notice and {count} GET/POST queries working")
 
 
 if __name__ == "__main__":
