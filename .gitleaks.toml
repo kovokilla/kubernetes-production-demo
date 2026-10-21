@@ -1,0 +1,14 @@
+title = "Production demo: default secret detectors with one reviewed dependency exception"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Exact publicly documented ssh-credentials plugin pin, not a credential"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(^|/)jenkins/controller/plugins\.txt$''']
+regexes = ['''(?m)^\+?ssh-credentials:372\.va_250881b_08cd\r?$''']

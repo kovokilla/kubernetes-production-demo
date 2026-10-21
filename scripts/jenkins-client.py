@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Authenticated local Jenkins operations. Credential contents are never printed."""
 import argparse
-import base64
-import http.cookiejar
 import http.client
 import json
 from pathlib import Path
 import time
 import urllib.error
 import urllib.request
+from local_http import LocalHTTPClient, UnsafeLocalRequest
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path.home() / ".local/share/kubernetes-production-demo/jenkins"
@@ -18,9 +17,7 @@ BASE = "http://127.0.0.1:8090"
 def client():
     # Authentication is confined to loopback and never written to logs/arguments.
     password = (STATE / "admin_password").read_text().strip()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-    opener.addheaders = [("Authorization", "Basic " + base64.b64encode(f"admin:{password}".encode()).decode())]
-    return opener
+    return LocalHTTPClient(BASE, username="admin", password=password, cookies=True)
 
 
 def request(opener, path, data=None, content_type=None):
@@ -96,3 +93,5 @@ if __name__ == "__main__":
         main(args.action, args.number)
     except urllib.error.HTTPError as error:
         raise SystemExit(f"Jenkins API returned HTTP {error.code}; no credential contents were logged.")
+    except UnsafeLocalRequest as error:
+        raise SystemExit(str(error))

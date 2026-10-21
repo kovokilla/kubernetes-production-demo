@@ -9,6 +9,7 @@ Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap a
 - [Architecture](#architecture)
 - [Run locally](#run-locally)
 - [Security](#security)
+- [Public-release checklist](#public-release-checklist)
 - [Jenkins CI/CD](#jenkins-cicd)
 - [Prometheus and Alertmanager](#prometheus-and-alertmanager)
 - [Validation without a cluster](#validation-without-a-cluster)
@@ -41,6 +42,8 @@ Local kind is a reproducible exercise environment, not a highly available produc
 - `Jenkinsfile`: checkout → validate → build → load images → package → deploy → verify.
 - `jenkins`: Docker Compose controller/agent, pinned plugins and configuration as code.
 - `scripts`: bootstrap, local deployment and validation.
+- `SECURITY.md`: trust boundaries, vulnerability reporting and release safeguards.
+- `.gitleaks.toml`: default secret detectors with one exact public dependency-pin exception.
 
 ## Run locally
 
@@ -100,9 +103,40 @@ All other application pod ingress and egress is denied. Return traffic for permi
 
 `smoke-test.sh` verifies the full ingress/API path, positive and negative RBAC checks, allowed frontend → backend traffic, denied backend → frontend traffic, and denied access from an unrelated namespace. It creates a temporary test namespace and removes it afterward. It requires administrator impersonation and namespace-creation rights; it is not intended to run as `demo-reader`.
 
+## Public-release checklist
+
+See [SECURITY.md](SECURITY.md) for the supported trust boundaries and private vulnerability-reporting guidance. Publishing source does not make this local lab production-ready or expose its services automatically.
+
+Before an explicitly authorized visibility change:
+
+1. Run tests and review the exact changes intended for publication:
+
+   ```bash
+   bash scripts/validate.sh
+   git diff --check
+   ```
+
+2. Install a reviewed Gitleaks release (v8.30.1 was validated), then scan all reachable history and current publishable source:
+
+   ```bash
+   bash scripts/security-check.sh
+   ```
+
+   The scan uses default detectors and fully redacts findings. Its one rule-scoped exception covers only the exact known public plugin-version line in `jenkins/controller/plugins.txt`; it does not exempt the whole file. The script rejects accidentally publishable private guides/generated directories and refuses to follow source symlinks without review. It is a separate local gate, not a mandatory Jenkins stage unless Gitleaks is also installed on that agent.
+
+3. Review commit-author privacy. Using a GitHub noreply address affects future commits only. Existing author metadata remains unless history is deliberately rewritten; this project preserves its existing history.
+4. Confirm generated credentials, kubeconfigs, private `_README.private.md` guides, tool downloads and local artifacts remain excluded. Never use force-add to bypass those exclusions. Review old CI logs/artifacts and package visibility separately from source visibility.
+5. Configure protected `main`/rulesets as soon as the GitHub plan/visibility supports them: require pull requests, block force pushes/deletion, resolve conversations and require independent approval when a trusted reviewer is available. A sole maintainer cannot approve their own PR; choose that approval requirement deliberately. Do not require a CI status that Jenkins does not actually publish—the current job polls and deploys trusted `main`, not unreviewed PRs.
+6. Enable available GitHub secret scanning, push protection and private vulnerability reporting after publication. Keep GitHub Actions disabled unless intentionally reviewed, and never run untrusted fork/PR code on the privileged Jenkins agent.
+7. Review dependency/image advisories and choose an appropriate license before inviting general reuse.
+
+GitHub can reject branch-protection/ruleset configuration for a private repository on a plan that does not support it. Do not silently substitute weaker protections or change visibility to bypass that decision; keep the repository private until the owner explicitly authorizes the next publication step.
+
+The shared local HTTP client and Jenkins helper bind credentials to the configured loopback scheme/host/port, reject unsafe redirects and disable environment proxies. Same-origin redirects continue to work. This does not authenticate an unknown process listening on localhost; prefer helper-owned port-forwards and do not send local admin credentials to an untrusted listener.
+
 ## Jenkins CI/CD
 
-The private source repository remains on GitHub. Jenkins polls only `main` every two minutes; no public webhook, tunnel or GitHub Actions runner is needed. The local setup targets Apple Silicon/Linux ARM64 containers and requires Docker Compose plus an authenticated `gh` CLI with permission to register a read-only repository deploy key.
+The source repository remains on GitHub. Jenkins polls only `main` every two minutes; no public webhook, tunnel or GitHub Actions runner is needed. The local setup targets Apple Silicon/Linux ARM64 containers and requires Docker Compose plus an authenticated `gh` CLI with permission to register a read-only repository deploy key.
 
 Commit and push the Jenkinsfile before the first setup. Setup queues an initial build to establish the SCM checkout baseline; subsequent pushes are detected by polling. If setup happened before the Jenkinsfile was available, run `python3 scripts/jenkins-client.py bootstrap` after pushing it.
 
