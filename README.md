@@ -7,6 +7,7 @@ Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap a
 ## Contents
 
 - [Architecture](#architecture)
+- [Files](#files)
 - [Run locally](#run-locally)
 - [Security](#security)
 - [Public-release checklist](#public-release-checklist)
@@ -14,6 +15,7 @@ Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap a
 - [Prometheus and Alertmanager](#prometheus-and-alertmanager)
 - [Grafana dashboard](#grafana-dashboard)
 - [Validation without a cluster](#validation-without-a-cluster)
+- [Development and review workflow](#development-and-review-workflow)
 - [Operations and troubleshooting](#operations-and-troubleshooting)
 - [Cleanup](#cleanup)
 
@@ -164,6 +166,14 @@ The `production-demo` Pipeline-from-SCM job:
 7. Deploys that exact package using the namespaced deployer credential, waits for rollouts and checks the API through Traefik.
 
 The pipeline uses `imagePullPolicy: Never` and the local HTTP overlay. It needs no registry credentials and does not publish images or charts to GHCR. Its packaged release is intended only for nodes where those exact local images have been loaded. It does not commit generated release versions back to Git. Previous GitHub-published artifacts remain unchanged.
+
+### Which changes are deployed automatically?
+
+- **Application code, static assets and `charts/webapp`:** the next successful build after a merge to `main` rebuilds images and deploys the application package.
+- **Monitoring values, probes, alerts and dashboard JSON:** validated by the pipeline, but installed separately by an administrator with `bash scripts/monitoring-setup.sh`. Run both monitoring verification helpers afterward.
+- **Jenkins images, plugins and configuration:** require a reviewed rebuild/recreation through `bash scripts/jenkins-setup.sh`; the application job does not apply these changes.
+- **Cluster bootstrap, CNI and ingress configuration:** require a separate administrator-reviewed change using the relevant bootstrap resources. Do not delete/recreate the cluster merely to apply an application or documentation change.
+- **Documentation:** does not change runtime configuration, but any merge to `main` still triggers the full application pipeline because polling is not path-filtered.
 
 Concurrent builds are disabled, builds time out after 30 minutes, and only the latest 15 build logs/10 artifact sets are retained. To trigger a build manually:
 
@@ -345,6 +355,42 @@ python3 scripts/jenkins-client.py lint
 ```
 
 Rendered manifests and the local chart package are written to ignored `.artifacts/`. These checks do not prove image builds, actual NetworkPolicy enforcement or live rollout behavior; run bootstrap, deployment and smoke tests with Docker and Kubernetes available.
+
+## Development and review workflow
+
+Work from the repository root on a branch, rather than pushing unreviewed changes directly to `main`. For example, for a frontend text change:
+
+```bash
+git switch main
+git pull --ff-only
+git switch -c docs-or-feature/describe-change
+# Edit apps/frontend/public/index.html in your editor.
+bash scripts/validate.sh
+git diff --check
+git diff -- apps/frontend/public/index.html
+git add apps/frontend/public/index.html
+git commit -m "fix: clarify frontend text"
+git push -u origin HEAD
+gh pr create --base main --title "Clarify frontend text" --body "Describe the change and validation results."
+```
+
+Start with a clean working tree; do not discard unrelated work to follow this example. Stage only the intended files and choose a commit type/title that describes the actual change. Run infrastructure rendering, Prometheus rule tests and the secret scan when their scope applies, using the commands above. Do not attach generated artifacts, credentials or private guides to the PR.
+
+Jenkins intentionally does **not** test or deploy PR branches. Include local validation results in the PR; absence of a Jenkins PR check is expected, not proof of a passing build. Request review from a trusted collaborator who already has access to this private repository. Do not change visibility or grant new access merely to submit a review.
+
+After approval and merge, Jenkins polls `main` within approximately two minutes while the Mac and Docker are running. Check `python3 scripts/jenkins-client.py status`, confirm the build's revision matches the merged commit, and inspect the deployed release with the ConfigMap Helm driver. For runtime changes, run `bash scripts/smoke-test.sh`; for monitoring changes, apply the separate monitoring setup and run `python3 scripts/monitoring-verify.py` and `python3 scripts/grafana-verify.py`. A successful application build alone does not prove that monitoring or Jenkins configuration changes were installed.
+
+### Reviewer guide
+
+Review the complete repository as well as the PR diff when assessing the project:
+
+- **Application and architecture:** `apps/`, `charts/webapp` and `environments/`; check service routing, probes, Secret consumption and environment-specific image settings.
+- **Security:** `SECURITY.md`, application RBAC/NetworkPolicies, `infrastructure/deployer-rbac.yaml` and `scripts/local_http.py`; verify the documented Docker-socket trust boundary and credential handling.
+- **Delivery:** `Jenkinsfile` and `jenkins/`; check pinned dependencies, trusted-main-only checkout, packaged-release provenance and restricted deployment credentials.
+- **Monitoring:** `infrastructure/monitoring-values.yaml`, `infrastructure/blackbox-values.yaml` and `charts/monitoring-resources`; check bounded resources, private UI access, probe/alert behavior and the shared-VM node-metric limitation.
+- **Evidence:** use the validation scripts and `tests/` for reproducible checks. Live health is point-in-time evidence, not a permanent guarantee; the local stack and administrator permissions are required for live checks.
+
+Review submission is not authorization to publish or merge. The public-release checklist still applies, including commit-author privacy, GitHub protections where supported, dependency advisories and the owner's license decision. No license is currently supplied; do not assume permission for general reuse.
 
 ## Operations and troubleshooting
 
