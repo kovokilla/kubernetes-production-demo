@@ -36,6 +36,7 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
         secret-revision: {{ $.Values.secretRevision | quote }}
+        image-tag: {{ $settings.image.tag | quote }}
     spec:
       serviceAccountName: {{ include "webapp.name" $ }}-{{ $component }}
       automountServiceAccountToken: false
