@@ -1,6 +1,7 @@
 from pathlib import Path
 import subprocess
 import re
+import shlex
 import unittest
 import yaml
 
@@ -41,8 +42,18 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse((ROOT / ".github/workflows/ci-cd.yaml").exists())
         self.assertIn('scripts/jenkins-client.py" bootstrap', (ROOT / "scripts/jenkins-setup.sh").read_text())
         for script in re.findall(r"sh '''(.*?)'''", pipeline, flags=re.S):
+            self.assertNotRegex(script, r"\$\{env\.", "Use shell variables, not Groovy env references, inside shell scripts")
             result = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_docker_build_options_are_separate_arguments(self):
+        pipeline = (ROOT / "Jenkinsfile").read_text()
+        command = re.search(r"^\s*docker build (.*?)(?=\n)", pipeline, flags=re.M)
+        self.assertIsNotNone(command)
+        arguments = shlex.split(command.group(1).rstrip("\\").strip())
+        self.assertIn("--label", arguments)
+        if "--platform" in arguments:
+            self.assertIn(arguments[arguments.index("--platform") + 1], ("linux/arm64", "linux/amd64"))
 
     def test_deployer_cannot_list_or_write_application_secrets(self):
         documents = list(yaml.safe_load_all((ROOT / "infrastructure/deployer-rbac.yaml").read_text()))

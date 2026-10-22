@@ -36,7 +36,7 @@ pipeline {
                 sh '''#!/usr/bin/env bash
 set -euo pipefail
 for component in backend frontend; do
-  docker build --platform linux/arm64--label "org.opencontainers.image.revision=$RELEASE_SHA" \
+  docker build --platform linux/arm64 --label "org.opencontainers.image.revision=$RELEASE_SHA" \
     -t "demo/$component:$IMAGE_TAG" "apps/$component"
 done
 '''
@@ -73,12 +73,7 @@ set -euo pipefail
 kubectl --context kind-production-demo -n demo get secret demo-app -o name
 helm --kube-context kind-production-demo upgrade --install demo \
   ".artifacts/release/webapp-0.2.$BUILD_NUMBER.tgz" --namespace demo \
-  -f .artifacts/release/values.yaml \
-  --set frontend.image.repository="demo/frontend" \
-  --set frontend.image.tag="${env.IMAGE_TAG}" \
-  --set backend.image.repository="demo/backend" \
-  --set backend.image.tag="${env.IMAGE_TAG}" \
-  --atomic --wait --timeout 5m
+  -f .artifacts/release/values.yaml --atomic --wait --timeout 5m
 kubectl --context kind-production-demo -n demo rollout status deployment/demo-frontend --timeout=300s
 kubectl --context kind-production-demo -n demo rollout status deployment/demo-backend --timeout=300s
 '''
