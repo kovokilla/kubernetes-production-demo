@@ -310,7 +310,11 @@ Alertmanager groups notifications for ten seconds and sends firing/resolved aler
 
 **No email, Slack or external paging is configured.** This is intentional, testable local delivery—not a production notification guarantee. To add an external destination, configure a real Alertmanager receiver and store its authentication/webhook credentials outside Git. The local receiver's counters/logs are diagnostic and reset on restart; they are not a durable billing or audit ledger.
 
-`monitoring-verify.py` checks all active targets, the three probes, ten loaded rules and the Alertmanager connection. It temporarily creates `MonitoringSmokeTest`, verifies delivery through Prometheus → Alertmanager → receiver, then removes the rule and closes its loopback port-forwards. It does not stop the app or Jenkins. Alert resolution may take another evaluation/grouping interval after test-rule removal.
+`monitoring-verify.py` checks all active targets, the three probes, ten loaded rules and the Alertmanager connection. It temporarily creates `MonitoringSmokeTest`, verifies delivery through Prometheus → Alertmanager → receiver, then removes the rule and closes its loopback port-forwards. It does not stop the app or Jenkins. Removal of the test rule does not immediately clear Alertmanager's copy of the alert; resolution and the resolved notification can take several minutes.
+
+A successful verification proves scrape/probe health, rule loading and local delivery, **not** that every alert is inactive. Inspect Prometheus `ALERTS{alertstate="firing"}` and Alertmanager separately. Credential-expiry warnings can correctly fire while all application and monitoring workloads remain healthy. Use `(jenkins_deployer_credential_expiry_timestamp_seconds - time()) / 3600` to check hours remaining; renew manually with `bash scripts/jenkins-refresh-credentials.sh`. The helper synchronizes the public expiry gauge, and alerts clear after subsequent scrape/evaluation cycles.
+
+`alertmanager_notifications_failed_total` is cumulative since the Alertmanager process started. A nonzero historical value alone does not prove current delivery is failing. Check `sum(increase(alertmanager_notifications_failed_total{integration="webhook"}[1h]))`, recent notification logs and the synthetic delivery test together. Alertmanager's status API redacts webhook URLs; a redacted value is not evidence that the endpoint has changed.
 
 ### Jenkins address and expiry synchronization
 
@@ -378,6 +382,8 @@ Start with a clean working tree; do not discard unrelated work to follow this ex
 
 Jenkins intentionally does **not** test or deploy PR branches. Include local validation results in the PR; absence of a Jenkins PR check is expected, not proof of a passing build. Request review from a trusted collaborator who already has access to this private repository. Do not change visibility or grant new access merely to submit a review.
 
+After a PR is merged, start the next change from updated `main` on a new branch. Pushing new commits to the old PR branch does not reopen the merged PR or put those commits on `main`; they require a new PR and merge. A local commit alone is not a deployment trigger, and pushing a feature branch does not trigger this main-only job. Manually starting the job still checks out `main`, not your current local branch.
+
 After approval and merge, Jenkins polls `main` within approximately two minutes while the Mac and Docker are running. Check `python3 scripts/jenkins-client.py status`, confirm the build's revision matches the merged commit, and inspect the deployed release with the ConfigMap Helm driver. For runtime changes, run `bash scripts/smoke-test.sh`; for monitoring changes, apply the separate monitoring setup and run `python3 scripts/monitoring-verify.py` and `python3 scripts/grafana-verify.py`. A successful application build alone does not prove that monitoring or Jenkins configuration changes were installed.
 
 ### Reviewer guide
@@ -403,6 +409,7 @@ HELM_DRIVER=configmap .tools/helm --kube-context kind-production-demo -n demo hi
 ```
 
 - **No automatic build:** confirm the Jenkinsfile is pushed to `main`, the Mac is awake, Docker is running and `kind-builder` is online. Allow up to two minutes for polling. Use `jenkins-client.py bootstrap` if no initial successful checkout exists.
+- **HTML remains old after a successful build:** first confirm the HTML commit reached remote `main`, then compare the Jenkins checkout SHA with the deployed image tags. Rebuilding an unchanged `main` correctly reproduces its old HTML. The pipeline already generates unique image tags and supplies them through release values; do not add redundant Helm overrides or restart pods as a substitute for deploying the correct revision.
 - **Unauthorized/expired deploy credential:** run `bash scripts/jenkins-refresh-credentials.sh`. Do not replace it with an administrator kubeconfig.
 - **Missing local image:** use the full Jenkins build to preload every node. An archived chart alone cannot fetch these `Never`-pull images.
 - **App name does not resolve:** use the explicit Host-header curl command above. Check that ports 8080, 8443 and 8090 are not claimed by another service.
@@ -410,6 +417,26 @@ HELM_DRIVER=configmap .tools/helm --kube-context kind-production-demo -n demo hi
 - **Grafana page opens but shows “Failed to fetch” or panel-loading errors:** check that port 3000 is still forwarded and the Grafana container has not restarted/OOM-killed. A restart can drop the tunnel while leaving the old page visible. Re-establish the forward and hard-refresh the browser; inspect current memory/restart state before raising limits further.
 
 Use `python3 scripts/jenkins-client.py log 3` to inspect a specific build; substitute the required build number. The helper masks known local credentials, but review logs before sharing them.
+
+For a frontend update, trace the revision from Git to the release and actual pod content:
+
+```bash
+git fetch origin
+git log -1 --oneline origin/main
+git show origin/main:apps/frontend/public/index.html
+python3 scripts/jenkins-client.py status
+.tools/kubectl --context kind-production-demo -n demo get pods -l app.kubernetes.io/component=frontend -o custom-columns='NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready'
+HELM_DRIVER=configmap .tools/helm --kube-context kind-production-demo -n demo list
+curl --fail --silent --show-error -H 'Host: demo.localhost' http://127.0.0.1:8080/
+```
+
+The build log's checkout SHA, Helm `appVersion` and the SHA portion of each `sha-<commit>-build-<number>` image tag should agree. To inspect one frontend pod directly, replace `FRONTEND_POD_NAME` below with its name and repeat for every ready frontend replica:
+
+```bash
+.tools/kubectl --context kind-production-demo -n demo exec FRONTEND_POD_NAME -- node -e 'process.stdout.write(require("fs").readFileSync("/app/public/index.html"))'
+```
+
+If all ready pods and the ingress return the expected HTML but the browser does not, hard-refresh the browser. Investigate branch/revision mismatches before blaming browser or Docker caches.
 
 For an intentional rollback, inspect Helm history first, then select an existing revision whose images are still present on every kind node. For example, to roll back to revision 1:
 
