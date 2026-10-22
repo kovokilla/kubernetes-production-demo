@@ -73,7 +73,10 @@ set -euo pipefail
 kubectl --context kind-production-demo -n demo get secret demo-app -o name
 helm --kube-context kind-production-demo upgrade --install demo \
   ".artifacts/release/webapp-0.2.$BUILD_NUMBER.tgz" --namespace demo \
-  -f .artifacts/release/values.yaml --atomic --wait --timeout 5m
+  -f .artifacts/release/values.yaml \
+  --set frontend.image.tag="${env.IMAGE_TAG}" \
+  --set backend.image.tag="${env.IMAGE_TAG}" \
+  --atomic --wait --timeout 5m
 kubectl --context kind-production-demo -n demo rollout status deployment/demo-frontend --timeout=300s
 kubectl --context kind-production-demo -n demo rollout status deployment/demo-backend --timeout=300s
 '''
