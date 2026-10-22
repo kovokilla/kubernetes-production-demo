@@ -36,7 +36,7 @@ pipeline {
                 sh '''#!/usr/bin/env bash
 set -euo pipefail
 for component in backend frontend; do
-  docker build --label "org.opencontainers.image.revision=$RELEASE_SHA" \
+  docker build --platform linux/arm64--label "org.opencontainers.image.revision=$RELEASE_SHA" \
     -t "demo/$component:$IMAGE_TAG" "apps/$component"
 done
 '''
