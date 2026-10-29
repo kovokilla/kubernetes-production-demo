@@ -8,9 +8,9 @@ import secrets
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-STATE = Path.home() / ".local/share/kubernetes-production-demo/grafana"
+STATE = Path(os.environ.get("DEMO_STATE_ROOT", Path.home() / ".local/share/kubernetes-production-demo")) / "grafana"
 KUBECTL = str(ROOT / ".tools/kubectl") if (ROOT / ".tools/kubectl").exists() else "kubectl"
-BASE = [KUBECTL, "--context", "kind-production-demo", "-n", "monitoring"]
+BASE = [KUBECTL, "--context", os.environ.get("DEMO_CONTEXT", "kind-production-demo"), "-n", "monitoring"]
 
 
 def main():

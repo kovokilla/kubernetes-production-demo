@@ -22,8 +22,8 @@ with tempfile.TemporaryDirectory(prefix="publication-source-check-") as temporar
     for name in sorted(set(filter(None, names))):
         relative = Path(name)
         if relative.name == "_README.private.md" or any(
-            part in {".tools", ".artifacts", ".venv", ".secrets", "__pycache__"} for part in relative.parts
-        ):
+            part in {".tools", ".artifacts", ".venv", ".secrets", "__pycache__", ".terraform"} for part in relative.parts
+        ) or relative.name.endswith((".tfstate", ".tfplan", ".tfvars", ".tfvars.json")) or ".tfstate." in relative.name:
             raise SystemExit(f"Private or generated content is publishable: {name}")
         source = root / relative
         if source.is_symlink():

@@ -1,0 +1,50 @@
+pipeline {
+    agent { label 'kind-builder' }
+    options {
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '15', artifactNumToKeepStr: '10'))
+    }
+    triggers { pollSCM('H/2 * * * *') }
+    environment {
+        PATH = '/opt/venv/bin:/usr/local/bin:/usr/bin:/bin'
+        DOCKER_HOST = 'unix:///opt/docker.sock'
+    }
+    stages {
+        stage('Checkout trusted source') {
+            steps {
+                deleteDir()
+                checkout scm
+            }
+        }
+        stage('Validate') {
+            steps {
+                sh 'bash scripts/validate.sh'
+                sh 'bash scripts/validate-infrastructure.sh'
+                sh 'bash scripts/monitoring-check-rules.sh'
+                sh 'kubeconform -strict -summary -kubernetes-version 1.34.0 .artifacts/local.yaml .artifacts/production.yaml .artifacts/jenkins.yaml'
+            }
+        }
+        stage('Build and load immutable images') {
+            steps {
+                sh 'python3 scripts/gitops-ci.py build'
+            }
+        }
+        stage('Publish GitOps release') {
+            steps {
+                withCredentials([sshUserPrivateKey(credentialsId: 'gitops-writer', keyFileVariable: 'GITOPS_KEY')]) {
+                    sh 'python3 scripts/gitops-ci.py publish'
+                }
+                archiveArtifacts artifacts: '.artifacts/release/*.tgz,.artifacts/release/values.yaml,.artifacts/release/images.json,.artifacts/release/gitops-revision', fingerprint: true
+            }
+        }
+        stage('Observe Argo CD rollout') {
+            steps {
+                withCredentials([file(credentialsId: 'gitops-observer', variable: 'KUBECONFIG')]) {
+                    sh 'python3 scripts/gitops-ci.py wait'
+                }
+            }
+        }
+    }
+}

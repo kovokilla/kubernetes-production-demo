@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
+assert_legacy_mode
 require docker gh kubectl python3 ssh-keygen
 assert_cluster
 docker compose -f "$ROOT/jenkins/compose.yaml" build

@@ -30,6 +30,9 @@ class RepositoryTests(unittest.TestCase):
             ".env", ".env.production", ".secrets/token", "development.kubeconfig",
             "kubeconfig", "jenkins/nested/kubeconfig", ".tools/helm",
             ".artifacts/release/values.yaml", ".venv/pyvenv.cfg", "tests/__pycache__/test.pyc",
+            "terraform/local/.terraform/cache", "terraform/local/terraform.tfstate",
+            "terraform/local/terraform.tfstate.backup", "terraform/local/local.tfvars",
+            "terraform/local/saved.tfplan",
         }
         result = subprocess.run(
             ["git", "-C", str(ROOT), "check-ignore", "--no-index", "--stdin"],

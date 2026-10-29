@@ -4,6 +4,7 @@ import argparse
 from contextlib import ExitStack
 import importlib.util
 import json
+import os
 import re
 from pathlib import Path
 import time
@@ -13,7 +14,7 @@ import urllib.request
 from local_http import LocalHTTPClient, UnsafeLocalRequest
 
 ROOT = Path(__file__).resolve().parents[1]
-STATE = Path.home() / ".local/share/kubernetes-production-demo/grafana"
+STATE = Path(os.environ.get("DEMO_STATE_ROOT", Path.home() / ".local/share/kubernetes-production-demo")) / "grafana"
 
 
 def main(base_url=None):
@@ -30,6 +31,8 @@ def main(base_url=None):
         else:
             url = stack.enter_context(monitoring.forward("monitoring-grafana", 80, "/api/health"))
         desired = json.loads((ROOT / "charts/monitoring-resources/files/dashboard.json").read_text())
+        if os.environ.get("DEMO_GITOPS") == "1":
+            desired["panels"] = [panel for panel in desired["panels"] if panel["id"] != 4]
         desired_ids = {panel["id"] for panel in desired["panels"]}
         anonymous = LocalHTTPClient(url)
         authenticated = LocalHTTPClient(url, username="admin", password=password)
@@ -94,8 +97,9 @@ def main(base_url=None):
             raise RuntimeError("Grafana cannot reach the Prometheus datasource")
         panels = dashboard["dashboard"]["panels"]
         metric_panels = [panel for panel in panels if panel.get("targets")]
-        if len(metric_panels) != 12:
-            raise RuntimeError("Expected twelve provisioned metric panels and the kind notice")
+        expected_count = 11 if os.environ.get("DEMO_GITOPS") == "1" else 12
+        if len(metric_panels) != expected_count:
+            raise RuntimeError(f"Expected {expected_count} provisioned metric panels and the kind notice")
         count = 0
         node_names = None
         for panel in metric_panels:

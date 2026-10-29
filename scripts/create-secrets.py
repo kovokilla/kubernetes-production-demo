@@ -2,11 +2,12 @@
 """Generate demo credentials directly into Kubernetes without printing values."""
 import base64
 import json
+import os
 import secrets
 import subprocess
 import sys
 
-context = "kind-production-demo"
+context = os.environ.get("DEMO_CONTEXT", "kind-production-demo")
 
 
 def ensure_secret(namespace, name, values):

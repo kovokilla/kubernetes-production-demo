@@ -6,7 +6,7 @@ assert_cluster
 k -n demo rollout status deployment/demo-frontend --timeout=300s
 k -n demo rollout status deployment/demo-backend --timeout=300s
 curl --fail --silent --show-error --retry 5 --retry-connrefused \
-  -H 'Host: demo.localhost' http://127.0.0.1:8080/api/info |
+  -H 'Host: demo.localhost' "http://127.0.0.1:${DEMO_HTTP_PORT:-8080}/api/info" |
   python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["message"] and d["instance"] and len(d["signature"]) == 64; print("Ingress → frontend → backend: passed")'
 
 test "$(k -n demo auth can-i get pods --as=system:serviceaccount:demo:demo-observer)" = yes

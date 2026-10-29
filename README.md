@@ -2,12 +2,16 @@
 
 Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap and Secret configuration, RBAC, NetworkPolicy, Jenkins CI/CD, and Prometheus/Alertmanager/Grafana monitoring.
 
+Two delivery modes are available: the original Jenkins → Helm setup below, and the isolated [Terraform + Argo CD setup](#terraform--argo-cd-local-stack). The latter provisions a separate kind environment and uses GitOps rather than Jenkins Helm upgrades. Karpenter is not included.
+
 **Application:** http://demo.localhost:8080 · **Jenkins:** http://127.0.0.1:8090 · **Job:** `production-demo`
 
 ## Contents
 
 - [Architecture](#architecture)
 - [Files](#files)
+- [Presentation](#presentation)
+- [Terraform + Argo CD local stack](#terraform--argo-cd-local-stack)
 - [Run locally](#run-locally)
 - [Security](#security)
 - [Public-release checklist](#public-release-checklist)
@@ -21,7 +25,11 @@ Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap a
 
 ## Architecture
 
-Browser → Traefik (`ingress` namespace) → frontend ClusterIP Service → frontend pods → backend ClusterIP Service → backend pods (`demo` namespace).
+Logical routing: browser → Traefik (`ingress` namespace) → frontend Service / pods → backend ClusterIP Service → backend pods (`demo` namespace).
+
+Docker Desktop provides one Linux VM on the Mac. The kind control-plane and two workers are Docker containers inside it, not three independent machines. Jenkins runs outside Kubernetes as separate Docker Compose controller/SSH-agent containers; the application and monitoring workloads run inside Kubernetes.
+
+Clicking **Refresh API response** sends `GET /api/info` to `demo.localhost:8080`. Docker maps loopback port 8080 to the control-plane container's port 30080, Traefik's NodePort. Traefik matches the Ingress hostname and discovers frontend destinations through its Service; it normally forwards directly to a selected frontend pod IP rather than through the frontend ClusterIP. The frontend opens a separate HTTP connection to `demo-backend:8080`: CoreDNS resolves the backend Service name, and Kubernetes Service routing selects a backend pod. The JSON response returns through frontend → Traefik → browser, where JavaScript displays it without reloading the page. Jenkins and the monitoring stack are not in this application request path.
 
 - **Frontend:** static HTML/JavaScript served by Node.js, with a fixed same-origin `/api/info` reverse proxy.
 - **Backend:** dependency-free Node.js JSON API. `/healthz` and `/readyz` support Kubernetes probes.
@@ -36,19 +44,143 @@ Local kind is a reproducible exercise environment, not a highly available produc
 
 - `apps/frontend`, `apps/backend`: applications, tests and Dockerfiles.
 - `charts/webapp`: application Helm chart.
-- `charts/monitoring-resources`: monitoring probes, alert rules and local receiver.
+- `charts/monitoring-resources`: monitoring probes, alert rules, Grafana dashboard and local receiver.
 - `environments/local/values.yaml`: local images and HTTP ingress.
 - `environments/production/values.yaml`: optional HTTPS configuration for a real deployment.
 - `environments/jenkins/values.yaml`: local-kind delivery settings used by Jenkins.
 - `infrastructure`: kind, namespaces, pinned dependency versions, Traefik and optional deployment RBAC.
 - `infrastructure/monitoring-values.yaml`, `infrastructure/blackbox-values.yaml`: bounded monitoring stack settings.
 - `Jenkinsfile`: checkout → validate → build → load images → package → deploy → verify.
+- `Jenkinsfile.gitops`, `jenkins/gitops`: isolated GitOps CI/controller; no direct Helm deployment.
+- `terraform/local`: dependency-ordered local environment lifecycle.
+- `infrastructure/argocd-values.yaml`, `infrastructure/gitops-*.yaml`: pinned Argo CD installation and restricted application ownership.
 - `jenkins`: Docker Compose controller/agent, pinned plugins and configuration as code.
 - `scripts`: bootstrap, local deployment and validation.
 - `SECURITY.md`: trust boundaries, vulnerability reporting and release safeguards.
 - `.gitleaks.toml`: default secret detectors with one exact public dependency-pin exception.
 
+## Presentation
+
+The companion **Kubernetes-Demo-Overview.pptx** contains 11 slides for an approximately 8–10 minute overview, with editable diagrams and speaker notes. It covers the local runtime, application resources, request flow, NetworkPolicies, identities/secrets, Jenkins delivery, change workflow, monitoring, validation and limitations.
+
+The prepared deck is currently a **local-only file**, saved as `~/Kubernetes-Demo-Overview.pptx`, outside this checkout. It is not tracked by Git, included in Helm packages or downloaded by cloning the repository. On another machine, obtain the deck separately and adjust the path below if necessary.
+
+On macOS, open it with your default presentation application:
+
+```bash
+open "$HOME/Kubernetes-Demo-Overview.pptx"
+```
+
+Use PowerPoint or Keynote, inspect the speaker notes in the notes/presenter view, and start the slide show from the beginning. Opening the slides does not require Docker or Kubernetes.
+
+For an optional live demonstration, first confirm Docker Desktop and the cluster are running, then open `http://demo.localhost:8080` and click **Refresh API response**. For Grafana, start the loopback port-forward described in [Grafana dashboard](#grafana-dashboard) and sign in privately; do not display credential files or sensitive logs while presenting.
+
+The deck describes the original Jenkins/Helm design, not a current health report. It predates the Terraform/Argo CD mode documented below; its Terraform “next step” is now implemented as an additional local provisioning path. Explain this distinction when presenting, and update the deck before presenting GitOps as part of its diagrams.
+
+## Terraform + Argo CD local stack
+
+### Ownership and isolation
+
+Terraform orchestrates the new local environment; Jenkins builds images and publishes desired state; Argo CD alone reconciles the webapp resources. Do not run `deploy-local.sh`, the legacy Jenkins job, or a manual Helm upgrade against the Argo-owned application.
+
+Defaults leave the existing installation unchanged:
+
+- kind cluster/context: `production-demo-gitops` / `kind-production-demo-gitops`.
+- Application: `http://demo.localhost:18080`; reserved HTTPS mapping: 18443 (no local TLS configuration is implied).
+- Jenkins: `http://127.0.0.1:18090`, separate controller/agent containers and volumes.
+- Protected state: `~/.local/share/kubernetes-production-demo/production-demo-gitops/`, including a dedicated kubeconfig. No administrator kubeconfig is mounted in Jenkins.
+- Source branch: `main`; deployment branch: `gitops/local`. Use another `gitops/...` branch for another environment; existing deployment branches must have a matching environment marker.
+
+The underlying Docker `kind` network is shared, but this setup does not own/delete that network. Each application remains inside its own cluster; Jenkins uses an environment-specific SSH-agent hostname. Running both stacks needs substantially more Docker CPU/memory than running one; check Docker Desktop resources before provisioning. Do not stop or delete the original environment merely to make this one fit.
+
+### Prerequisites and first apply
+
+Docker Desktop must already be installed and running. Install kind, Git, Python/PyYAML, OpenSSH/OpenSSL and GitHub CLI; authenticate `gh` with permission to register repository deploy keys. Internet access and GitHub SSH access are required. Use the existing checksum-verified Helm/kubectl helpers and the Terraform helper:
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+python3 scripts/fetch-helm.py
+python3 scripts/fetch-kubectl.py
+python3 scripts/fetch-terraform.py
+.tools/terraform -chdir=terraform/local init
+.tools/terraform -chdir=terraform/local validate
+.tools/terraform -chdir=terraform/local plan
+bash scripts/validate-terraform.sh
+```
+
+Prefer the virtual environment from [Run locally](#run-locally). The Terraform helper pins 1.13.5; Argo CD is pinned to chart 10.11.6 in `infrastructure/versions.env`. No external Terraform providers are needed: these are explicit `terraform_data` bootstrap stages using the existing local CLIs.
+
+**Publish the reviewed implementation to the configured trusted source branch before applying.** Jenkins checks out remote SCM, not the workstation's uncommitted files. The preflight checks required remote source files against the local implementation and refuses a missing/mismatched version. A trusted integration branch can be selected with `-var=source_branch=...`; do not point this privileged CI at unreviewed code.
+
+The first apply performs external writes: it registers **three GitHub deploy keys** (Jenkins checkout read-only, Argo CD read-only, Jenkins GitOps repository-write), and the initial Jenkins build creates/updates `gitops/local`. The write key is repository-wide, **not branch-scoped**. Review this trust expansion in [SECURITY.md](SECURITY.md), obtain authorization and only then enable it explicitly:
+
+```bash
+.tools/terraform -chdir=terraform/local apply -var=allow_github_writes=true
+```
+
+Use the same variable values on subsequent applies, or store non-secret configuration in an ignored `.tfvars` file. Choose isolated names/ports before the first apply; changing immutable cluster identity/port settings requires a deliberately authorized replacement. Terraform never pushes source changes or changes repository visibility.
+
+The ordered apply checks prerequisites, creates kind, installs Calico and waits for nodes, provisions namespaces/Secrets/Traefik, installs Argo CD, provisions Jenkins, waits for the initial build and exact Argo revision, installs monitoring, and runs smoke/Grafana/synthetic-alert checks. Argo and Prometheus CRDs are installed before their custom resources. No manual `kubectl` bootstrap, targeted first apply, or second bootstrap apply is intended after prerequisites/source authorization are satisfied. Full live provisioning must still be validated on a fresh environment after the source is published; offline validation alone is not that proof.
+
+### GitOps delivery and verification
+
+`Jenkinsfile.gitops` polls only the trusted source branch. It validates source, builds unique `sha-<commit>-build-<number>` ARM64 images, loads them into every kind node, and publishes the versioned chart/provenance to `gitops/local` using a non-force push. Argo CD renders the chart from that branch and performs deployment, pruning and self-healing within `demo`. A restricted AppProject allows only the expected namespaced kinds and no Secrets/cluster-scoped resources. Application Secrets are bootstrap-owned, not committed to Git.
+
+Jenkins waits for **the exact deployment-branch revision** to be Synced/Healthy with a successful sync, then checks the API and served HTML against its source. Source SHA and GitOps commit SHA are different: the GitOps branch's `release.json` records source/image provenance. GitOps updates do not retrigger the source-only poller. These images remain local (`imagePullPolicy: Never`), so rebuilding the cluster requires reloading them; the bootstrap queues a new CI build.
+
+Terraform outputs the application/Jenkins URLs and the Argo CD port-forward command. For the default environment:
+
+```bash
+export KUBECONFIG="$HOME/.local/share/kubernetes-production-demo/production-demo-gitops/kubeconfig"
+.tools/kubectl --context kind-production-demo-gitops -n argocd get applications
+.tools/kubectl --context kind-production-demo-gitops -n demo get deployments,pods
+.tools/kubectl --context kind-production-demo-gitops -n argocd port-forward --address 127.0.0.1 service/argocd-server 18081:443
+```
+
+Open `https://localhost:18081` in your browser; use Argo CD user `admin` and the protected `argocd_admin_password` file in this environment's state directory. Argo's chart generates a self-signed server certificate: use a deliberately trusted local certificate or inspect/trust the local certificate explicitly; do not disable verification in scripts. Credentials must not be printed or put in URLs. The Argo UI is ClusterIP-only, with no public Ingress.
+
+Jenkins has no application deployment token in this mode. Its `gitops-observer` credential is a 30-day client certificate whose Role permits only `get` on `argocd/demo` Application; it cannot sync, mutate workloads or read Secrets. Reapply the Jenkins stage before that observer certificate expires (and after cluster recreation):
+
+```bash
+.tools/terraform -chdir=terraform/local apply -var=allow_github_writes=true -replace=terraform_data.jenkins
+```
+
+This refreshes the observer, recreates only the isolated Jenkins containers, queues a build and reruns downstream verification. The signer may issue a shorter certificate; inspect its actual validity using your administrator tooling. In GitOps monitoring mode (`gitops.enabled=true`), the three obsolete deployment-token-expiry rules and corresponding dashboard panel are removed: **seven rules and eleven metric panels plus the kind notice** remain. The legacy stack retains ten rules/twelve metric panels. No observer-expiry alert is currently installed.
+
+For manual verification, set the isolated context and helper environment explicitly:
+
+```bash
+export DEMO_CONTEXT=kind-production-demo-gitops
+export DEMO_STATE_ROOT="$HOME/.local/share/kubernetes-production-demo/production-demo-gitops"
+export DEMO_GITOPS=1 DEMO_HTTP_PORT=18080 DEMO_JENKINS_PORT=18090
+export DEMO_COMPOSE_FILE="$DEMO_STATE_ROOT/compose.yaml"
+export DEMO_COMPOSE_PROJECT=production-demo-gitops
+bash scripts/smoke-test.sh
+python3 scripts/monitoring-verify.py
+python3 scripts/grafana-verify.py
+```
+
+Use a separate shell for that environment; unset these variables before operating the legacy stack. The protected state directory also holds the separate Jenkins admin password and Grafana credentials. Keep legacy `jenkins-refresh-credentials.sh` away from this mode.
+
+### Reapply, recovery and teardown
+
+Terraform tracks ordered bootstrap stages and hashes of their non-secret source inputs, **not every underlying Kubernetes/Docker object**. A normal repeat apply with unchanged configuration should be a no-op; individual platform-object drift is not automatically detected by Terraform. Argo CD handles webapp drift. To intentionally rerun platform stages, use `-replace=terraform_data.platform`; this reruns dependent bootstrap stages, including CI/verification, without replacing kind.
+
+If a stage fails, fix the cause and reapply; helpers preserve matching owned resources and avoid force-pushing Git. Cluster-creation failures are special: Terraform can mark the cluster stage tainted. Inspect/recover the owned cluster first; untaint only after verifying the partial stage is safely recoverable, or explicitly authorize its destructive replacement. Do not remove state/import unrelated resources as a shortcut. An existing unowned cluster is never silently adopted.
+
+For a GitOps rollback, revert the desired deployment chart/image references on the deployment branch to a known release whose images still exist on all nodes; Argo CD reconciles that Git change. Do not use `helm rollback` on the Argo-owned app. The next successful source build will publish a newer release. To validate self-healing in an authorized test environment, temporarily change a managed Deployment's replicas and observe Argo restore Git's value.
+
+Destroying this isolated environment removes its in-cluster resources/PVC data. Back up needed data and review the plan before explicitly authorizing teardown:
+
+```bash
+DEMO_ALLOW_DESTROY=production-demo-gitops .tools/terraform -chdir=terraform/local destroy -var=allow_github_writes=true
+```
+
+The helper verifies an ownership marker, stops/removes only this stack's Compose containers and deletes only this kind cluster. Docker volumes, protected local state and GitHub deploy keys/deployment branch are deliberately retained; review/revoke/remove them separately when permanently decommissioning. The original cluster, legacy Jenkins volumes and shared Docker network are not removed. Terraform state/plans and `.tfvars` remain ignored and must be secured/backed up outside Git.
+
 ## Run locally
+
+This section and the legacy Jenkins/monitoring sections describe the original `production-demo` environment on ports 8080/8090. Follow the Terraform section instead to create the isolated GitOps variant.
 
 Prerequisites: Docker Desktop with its Compose plugin, kind, Python 3.9+, Node.js 24+, OpenSSH tools and GitHub CLI. The application can run on other Kubernetes platforms, but the pinned Jenkins controller/agent images in this repository target ARM64. The documented setup is macOS on Apple Silicon.
 
@@ -101,6 +233,8 @@ Application NetworkPolicies allow only:
 1. Application pods → CoreDNS in `kube-system`, TCP/UDP 53.
 2. Traefik-labelled pods in namespace `ingress` → frontend pods, TCP 8080.
 3. Frontend pods → backend pods in the same namespace, TCP 8080.
+
+All four application policies are defined in `charts/webapp/templates/networkpolicy.yaml` and installed as Kubernetes objects by Helm when `networkPolicy.enabled` is true. `demo-default-deny` selects all pods in `demo` with `podSelector: {}` and contains no allow rules. The separate `demo-dns`, `demo-frontend` and `demo-backend` policies add the permitted paths above. Policies are additive: describing only `demo-default-deny` will not show those other policies' allow rules. A separate policy restricts the monitoring webhook receiver; the whole `monitoring` namespace is not covered by the application's default-deny policy.
 
 All other application pod ingress and egress is denied. Return traffic for permitted connections is allowed by the CNI. These policies require an enforcing CNI; kind's default CNI is deliberately disabled. Label-based isolation assumes untrusted users cannot create or relabel privileged workloads. Do not install unrelated workloads in the dedicated `demo` namespace.
 

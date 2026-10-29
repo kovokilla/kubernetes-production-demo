@@ -14,3 +14,9 @@
 **/*.kubeconfig
 **/kubeconfig
 **/_README.private.md
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/*.tfvars
+**/*.tfvars.json

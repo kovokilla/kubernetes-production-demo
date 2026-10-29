@@ -6,4 +6,14 @@ metadata:
     grafana_dashboard: "1"
 data:
   production-demo-overview.json: |
-    {{- .Files.Get "files/dashboard.json" | nindent 4 }}
+    {{- $dashboard := .Files.Get "files/dashboard.json" | fromJson }}
+    {{- if .Values.gitops.enabled }}
+    {{- $panels := list }}
+    {{- range $panel := $dashboard.panels }}
+    {{- if ne (int $panel.id) 4 }}
+    {{- $panels = append $panels $panel }}
+    {{- end }}
+    {{- end }}
+    {{- $_ := set $dashboard "panels" $panels }}
+    {{- end }}
+    {{- $dashboard | toPrettyJson | nindent 4 }}

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
+assert_legacy_mode
 require docker kind kubectl helm python3
 docker info >/dev/null
 source "$ROOT/infrastructure/versions.env"

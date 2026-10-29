@@ -1,3 +1,11 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+crash.log
 node_modules/
 .tools/
 .artifacts/

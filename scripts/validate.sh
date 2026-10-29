@@ -19,7 +19,7 @@ import sys
 import yaml
 root = Path(sys.argv[1])
 for path in root.rglob("*"):
-    if not path.is_file() or any(part in {".tools", ".artifacts", ".git", ".venv", "__pycache__"} for part in path.relative_to(root).parts[:-1]):
+    if not path.is_file() or any(part in {".tools", ".artifacts", ".git", ".venv", ".terraform", "__pycache__"} for part in path.relative_to(root).parts[:-1]):
         continue
     if path.suffix == ".py":
         ast.parse(path.read_text(), filename=str(path))
@@ -40,4 +40,7 @@ helm package "$ROOT/charts/webapp" --destination "$ROOT/.artifacts"
 helm lint "$ROOT/charts/monitoring-resources" --strict
 helm template monitoring-resources "$ROOT/charts/monitoring-resources" --namespace monitoring \
   --kube-version 1.34.0 > "$ROOT/.artifacts/monitoring-resources.yaml"
+helm lint "$ROOT/charts/monitoring-resources" --strict --set gitops.enabled=true
+helm template monitoring-resources "$ROOT/charts/monitoring-resources" --namespace monitoring \
+  --kube-version 1.34.0 --set gitops.enabled=true > "$ROOT/.artifacts/monitoring-gitops.yaml"
 printf 'Local validation passed. Live cluster checks: bash scripts/smoke-test.sh\n'

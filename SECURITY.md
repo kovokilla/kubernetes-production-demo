@@ -37,6 +37,46 @@ repository visibility is not sufficient.
 - Application HTTP and direct kind image loading are lab conveniences, not
   recommendations for public production services.
 
+
+## Terraform / Argo CD mode
+
+The optional isolated GitOps environment does not adopt the legacy cluster or
+its Jenkins volumes. Terraform bootstraps platform components and Argo CD
+owns the webapp; do not grant multiple deployment systems ownership of it.
+Terraform uses local bootstrap stages, not native per-object drift detection.
+Generated kubeconfigs, private keys and passwords are kept outside the checkout
+and passed through stdin/volumes, not Terraform variables or outputs. State
+and plan files must still be private and backed up; `sensitive` alone would not
+encrypt them. Terraform artifacts are excluded from Git and Docker build contexts.
+
+Initial provisioning registers separate GitHub deploy keys for checkout,
+Argo CD read access and GitOps publication. The publication key is
+**repository-write**, not branch-limited. The publisher checks its environment
+marker and never force-pushes, but those checks are not a GitHub authorization
+boundary: compromised CI could use the key elsewhere in the repository.
+Use only trusted source branches and an appropriately scoped separate
+deployment repository/GitHub App before extending this design to less-trusted
+contributors. `allow_github_writes` defaults to false; turning it on authorizes
+key registration and deployment-branch writes, not publication of local source.
+
+Jenkins does not receive application deployment privileges. Its separate
+observer client certificate requests a 30-day lifetime and permits only
+GET of the single `demo` Application in namespace `argocd`. The actual lifetime
+depends on the cluster signer; renew through the Jenkins bootstrap stage
+before expiry. This is not the legacy deployment token and its expiry is not
+currently alerted on. The agent still has powerful Docker-daemon access.
+
+Argo CD has broader controller privileges as a platform component. Its `demo`
+AppProject limits application destinations to `demo`, restricts resource kinds,
+and does not allow Secrets or cluster-scoped objects. Repository access uses
+verified SSH host keys. The UI stays ClusterIP-only and serves TLS; inspect/trust
+its self-signed local certificate instead of disabling script verification.
+
+Teardown requires an exact environment-name confirmation and matching local
+ownership marker. It deletes the owned cluster and its PVC data, but deliberately
+retains Docker volumes, protected credentials and GitHub deploy keys/history.
+Revoke those credentials and review retained data separately when decommissioning.
+
 ## Local HTTP clients
 
 Credential-bearing local helpers are bound to one validated HTTP loopback

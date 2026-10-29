@@ -2,6 +2,7 @@
 """Verify monitoring and test local alert delivery without disrupting workloads."""
 from contextlib import ExitStack, contextmanager
 import json
+import os
 from pathlib import Path
 import re
 import socket
@@ -12,7 +13,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 KUBECTL = str(ROOT / ".tools/kubectl") if (ROOT / ".tools/kubectl").exists() else "kubectl"
-BASE = [KUBECTL, "--context", "kind-production-demo", "-n", "monitoring"]
+BASE = [KUBECTL, "--context", os.environ.get("DEMO_CONTEXT", "kind-production-demo"), "-n", "monitoring"]
 
 
 def get(url):
@@ -91,15 +92,17 @@ def main():
         print(f"All {len(targets)} active scrape targets and all three availability probes are healthy")
         groups = json.loads(get(prometheus + "/api/v1/rules?type=alert"))["data"]["groups"]
         rules = [rule for group in groups for rule in group["rules"] if group["name"] == "application-and-jenkins"]
-        if len(rules) != 10 or any(rule.get("health") != "ok" for rule in rules):
-            raise RuntimeError("Expected ten healthy application/Jenkins alert rules")
+        expected_count = 7 if os.environ.get("DEMO_GITOPS") == "1" else 10
+        if len(rules) != expected_count or any(rule.get("health") != "ok" for rule in rules):
+            raise RuntimeError(f"Expected {expected_count} healthy application/Jenkins alert rules")
         managers = json.loads(get(prometheus + "/api/v1/alertmanagers"))["data"]["activeAlertmanagers"]
         if not managers:
             raise RuntimeError("Prometheus has no active Alertmanager connection")
-        expiry = query(prometheus, "jenkins_deployer_credential_expiry_timestamp_seconds")
-        if not expiry or float(expiry[0]["value"][1]) <= 0:
-            raise RuntimeError("Public credential-expiry metadata is missing")
-        print("Ten alert rules loaded; Alertmanager connected; public expiry gauge present")
+        if os.environ.get("DEMO_GITOPS") != "1":
+            expiry = query(prometheus, "jenkins_deployer_credential_expiry_timestamp_seconds")
+            if not expiry or float(expiry[0]["value"][1]) <= 0:
+                raise RuntimeError("Public credential-expiry metadata is missing")
+        print(f"{expected_count} alert rules loaded; Alertmanager connected")
         baseline = notifications(receiver)
         test_rule = {
             "apiVersion": "monitoring.coreos.com/v1", "kind": "PrometheusRule",

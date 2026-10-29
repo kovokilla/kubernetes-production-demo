@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
+assert_legacy_mode
 require docker kubectl python3
 assert_cluster
 export KUBE_DEPLOY_TOKEN="$(k -n demo create token demo-deployer --duration=24h)"

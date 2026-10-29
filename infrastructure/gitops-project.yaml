@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: demo
+  namespace: argocd
+spec:
+  description: Trusted webapp only; bootstrap fills the exact source repository.
+  sourceRepos: []
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: demo
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - { group: apps, kind: Deployment }
+    - { group: "", kind: Service }
+    - { group: "", kind: ServiceAccount }
+    - { group: "", kind: ConfigMap }
+    - { group: networking.k8s.io, kind: Ingress }
+    - { group: networking.k8s.io, kind: NetworkPolicy }
+    - { group: rbac.authorization.k8s.io, kind: Role }
+    - { group: rbac.authorization.k8s.io, kind: RoleBinding }
