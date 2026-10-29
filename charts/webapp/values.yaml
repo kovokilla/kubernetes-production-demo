@@ -6,7 +6,7 @@ imagePullSecrets: []
 frontend:
   image:
     repository: demo/frontend
-    tag: sha-bf506fe1ae3467511cfb13120e2161353c3954de-build-1
+    tag: sha-0cdaaf29577c8a529c92ad736af1251758e881ef-build-3
     digest: ''
     pullPolicy: Never
   replicas: 2
@@ -20,7 +20,7 @@ frontend:
 backend:
   image:
     repository: demo/backend
-    tag: sha-bf506fe1ae3467511cfb13120e2161353c3954de-build-1
+    tag: sha-0cdaaf29577c8a529c92ad736af1251758e881ef-build-3
     digest: ''
     pullPolicy: Never
   replicas: 2
