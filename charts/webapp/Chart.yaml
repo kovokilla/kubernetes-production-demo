@@ -2,6 +2,6 @@ apiVersion: v2
 name: webapp
 description: Hardened frontend and backend Kubernetes demonstration
 type: application
-version: 0.2.3
-appVersion: 0cdaaf29577c8a529c92ad736af1251758e881ef
+version: 0.2.4
+appVersion: ae427b5d12062e3440c8523b10ec817ef72e3209
 kubeVersion: '>=1.30.0-0'
