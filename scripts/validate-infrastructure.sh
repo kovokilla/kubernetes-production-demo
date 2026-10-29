@@ -14,6 +14,10 @@ render() {
 render traefik traefik https://traefik.github.io/charts "$TRAEFIK_CHART_VERSION" ingress
 render monitoring kube-prometheus-stack https://prometheus-community.github.io/helm-charts "$MONITORING_CHART_VERSION" monitoring
 render argocd argo-cd https://argoproj.github.io/argo-helm "$ARGOCD_CHART_VERSION" argocd
+helm template traefik traefik --repo https://traefik.github.io/charts --version "$TRAEFIK_CHART_VERSION" \
+  --namespace ingress --kube-version 1.34.0 \
+  -f "$ROOT/infrastructure/traefik-values.yaml" -f "$ROOT/infrastructure/traefik-gitops-values.yaml" \
+  > "$ROOT/.artifacts/infra-traefik-gitops.yaml"
 helm template monitoring-blackbox prometheus-blackbox-exporter \
   --repo https://prometheus-community.github.io/helm-charts --version "$BLACKBOX_CHART_VERSION" \
   --namespace monitoring --kube-version 1.34.0 -f "$ROOT/infrastructure/blackbox-values.yaml" \
@@ -26,6 +30,11 @@ root = Path(sys.argv[1])
 for path in sorted((root / ".artifacts").glob("infra-*.yaml")):
     documents = [doc for doc in yaml.safe_load_all(path.read_text()) if doc]
     assert documents, path
+    if path.name == "infra-traefik-gitops.yaml":
+        deployment = next(doc for doc in documents if doc["kind"] == "Deployment")
+        args = deployment["spec"]["template"]["spec"]["containers"][0]["args"]
+        assert "--providers.kubernetesingress.ingressendpoint.hostname=demo.localhost" in args
+        assert not any("ingressendpoint.publishedservice=" in arg for arg in args)
     if path.name == "infra-argocd.yaml":
         server = next(doc for doc in documents if doc["kind"] == "Service"
                       and doc["metadata"]["name"] == "argocd-server")

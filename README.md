@@ -93,6 +93,8 @@ Defaults leave the existing installation unchanged:
 
 The underlying Docker `kind` network is shared, but this setup does not own/delete that network. Each application remains inside its own cluster; Jenkins uses an environment-specific SSH-agent hostname. Running both stacks needs substantially more Docker CPU/memory than running one; check Docker Desktop resources before provisioning. Do not stop or delete the original environment merely to make this one fit.
 
+The GitOps Traefik overlay publishes `demo.localhost` in Ingress status. Without it, the local NodePort has no load-balancer address and Argo CD can remain `Progressing` despite ready pods. This preserves Argo's standard health checks; Jenkins still verifies real HTTP/API and HTML responses.
+
 ### Prerequisites and first apply
 
 Docker Desktop must already be installed and running. Install kind, Git, Python/PyYAML, OpenSSH/OpenSSL and GitHub CLI; authenticate `gh` with permission to register repository deploy keys. Internet access and GitHub SSH access are required. Use the existing checksum-verified Helm/kubectl helpers and the Terraform helper:

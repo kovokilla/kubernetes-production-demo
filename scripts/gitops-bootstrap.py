@@ -158,7 +158,8 @@ def platform(c):
         apply(c, [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}])
     run(["python3", ROOT / "scripts/create-secrets.py"], env=stage_environment(c))
     helm(c, "traefik", "traefik", "ingress", repository="https://traefik.github.io/charts",
-         version=versions()["TRAEFIK_CHART_VERSION"], values=[ROOT / "infrastructure/traefik-values.yaml"])
+         version=versions()["TRAEFIK_CHART_VERSION"],
+         values=[ROOT / "infrastructure/traefik-values.yaml", ROOT / "infrastructure/traefik-gitops-values.yaml"])
 
 
 def keypair(state, name, kind, bits=None, pem=False):
