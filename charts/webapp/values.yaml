@@ -1,0 +1,48 @@
+fullnameOverride: demo
+message: Hello from Kubernetes!
+existingSecret: demo-app
+secretRevision: '1'
+imagePullSecrets: []
+frontend:
+  image:
+    repository: demo/frontend
+    tag: sha-bf506fe1ae3467511cfb13120e2161353c3954de-build-1
+    digest: ''
+    pullPolicy: Never
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+backend:
+  image:
+    repository: demo/backend
+    tag: sha-bf506fe1ae3467511cfb13120e2161353c3954de-build-1
+    digest: ''
+    pullPolicy: Never
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+ingress:
+  enabled: true
+  className: traefik
+  host: demo.localhost
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.tls: 'false'
+  tls:
+    enabled: false
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress
+rbac:
+  enabled: true
+  readerGroup: demo-readers

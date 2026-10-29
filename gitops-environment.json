@@ -1,0 +1,4 @@
+{
+  "cluster": "production-demo-gitops",
+  "repository": "kovokilla/kubernetes-production-demo"
+}

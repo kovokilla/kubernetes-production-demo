@@ -1,0 +1,9 @@
+{
+  "commit": "bf506fe1ae3467511cfb13120e2161353c3954de",
+  "build": "1",
+  "tag": "sha-bf506fe1ae3467511cfb13120e2161353c3954de-build-1",
+  "imageIds": {
+    "backend": "sha256:a40bc0df4757f254a7a7cb702b9dafe2d815e94d544fe2e9afd2efdea674fa0a",
+    "frontend": "sha256:f2c44971345fe004fa82c4b6f0d0b9ca66578faedc3a81fc93103feb84c1f393"
+  }
+}
