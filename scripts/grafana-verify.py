@@ -17,6 +17,20 @@ ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.environ.get("DEMO_STATE_ROOT", Path.home() / ".local/share/kubernetes-production-demo")) / "grafana"
 
 
+def wait_for_node_series(query, expected, attempts=24):
+    """Rates need multiple scrapes; never treat missing nodes as zero usage."""
+    for attempt in range(attempts):
+        result = query()
+        names = {item["metric"].get("nodename") for item in result.get("data", {}).get("result", [])}
+        if result.get("status") == "success" and names == expected:
+            return result
+        if attempt == 0:
+            print("Waiting for complete node rate-series after monitoring startup", flush=True)
+        if attempt + 1 < attempts:
+            time.sleep(5)
+    raise RuntimeError("Node usage series did not match readiness data after startup wait")
+
+
 def main(base_url=None):
     spec = importlib.util.spec_from_file_location("monitoring_verify", ROOT / "scripts/monitoring-verify.py")
     monitoring = importlib.util.module_from_spec(spec)
@@ -105,8 +119,11 @@ def main(base_url=None):
         for panel in metric_panels:
             browser_queries = []
             for target in panel.get("targets", []):
-                result = api("/api/datasources/proxy/uid/prometheus/api/v1/query?" +
-                             urllib.parse.urlencode({"query": target["expr"]}))
+                path = "/api/datasources/proxy/uid/prometheus/api/v1/query?" + urllib.parse.urlencode({"query": target["expr"]})
+                if panel["id"] in (12, 13) and node_names:
+                    result = wait_for_node_series(lambda: api(path), node_names)
+                else:
+                    result = api(path)
                 if result.get("status") != "success" or not result["data"]["result"]:
                     raise RuntimeError(f"No data or query error in panel: {panel['title']}")
                 if panel["id"] in (10, 11, 12, 13):

@@ -1,12 +1,30 @@
 from pathlib import Path
 import json
+import importlib.util
+import sys
 import unittest
+from unittest.mock import Mock, patch
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class MonitoringTests(unittest.TestCase):
+    def test_fresh_node_rates_wait_for_all_nodes_without_faking_zero(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        spec = importlib.util.spec_from_file_location("grafana_verifier", ROOT / "scripts/grafana-verify.py")
+        verifier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verifier)
+        def result(names):
+            return {"status": "success", "data": {"result": [
+                {"metric": {"nodename": name}, "value": [0, "12.5"]} for name in names]}}
+        ready = result(["a", "b", "c"])
+        query = Mock(side_effect=[result(["a"]), ready])
+        with patch.object(verifier.time, "sleep"):
+            self.assertIs(verifier.wait_for_node_series(query, {"a", "b", "c"}), ready)
+            with self.assertRaises(RuntimeError):
+                verifier.wait_for_node_series(lambda: result(["a"]), {"a", "b", "c"}, attempts=2)
+
     def test_grafana_has_no_unscoped_authenticated_opener(self):
         source = (ROOT / "scripts/grafana-verify.py").read_text()
         self.assertIn('LocalHTTPClient(url, username="admin", password=password)', source)
