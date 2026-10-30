@@ -1,4 +1,5 @@
 import copy
+import base64
 import importlib.util
 import json
 import os
@@ -34,6 +35,22 @@ CONFIG = {
 
 
 class GitOpsConfigurationTests(unittest.TestCase):
+    def test_rebuilt_cluster_refreshes_initial_argocd_password_privately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            path = state / "argocd_admin_password"
+            path.write_text("old-fixture")
+            secret = {"data": {"password": base64.b64encode(b"new-fixture").decode()}}
+            with patch.object(bootstrap, "state_path", return_value=state), \
+                    patch.object(bootstrap, "run", return_value=json.dumps(secret)):
+                bootstrap.sync_argocd_initial_password(CONFIG)
+            self.assertEqual(path.read_text(), "new-fixture")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            with patch.object(bootstrap, "state_path", return_value=state), \
+                    patch.object(bootstrap, "run", return_value=""):
+                bootstrap.sync_argocd_initial_password(CONFIG)
+            self.assertEqual(path.read_text(), "new-fixture")
+
     def test_default_is_isolated(self):
         self.assertEqual(support.validate_config(dict(CONFIG)), CONFIG)
         env = support.stage_environment(CONFIG)

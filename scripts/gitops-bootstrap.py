@@ -231,11 +231,19 @@ def argocd(c):
     application = yaml.safe_load((ROOT / "infrastructure/gitops-application.yaml").read_text())
     application["spec"]["source"].update(repoURL=repo_url(c), targetRevision=c["gitops_branch"])
     apply(c, [project, application])
-    # Preserve the initial login credential privately; never print its contents.
-    path = state / "argocd_admin_password"
-    if not path.exists():
-        secret = get(c, "secret", "argocd-initial-admin-secret", "argocd")
+    sync_argocd_initial_password(c)
+
+
+def sync_argocd_initial_password(c):
+    """A new cluster generates a new initial password even if local state survives."""
+    path = state_path(c) / "argocd_admin_password"
+    raw = run(kube(c, "-n", "argocd", "get", "secret", "argocd-initial-admin-secret",
+                   "--ignore-not-found", "-o", "json"), capture=True)
+    if raw:
+        secret = json.loads(raw)
         save_private(path, base64.b64decode(secret["data"]["password"]).decode())
+    elif not path.exists():
+        raise RuntimeError("No initial Argo credential or protected rotated credential is available")
 
 
 def observer(c):

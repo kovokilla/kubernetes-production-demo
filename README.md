@@ -141,6 +141,8 @@ export KUBECONFIG="$HOME/.local/share/kubernetes-production-demo/production-demo
 
 Open `https://localhost:18081` in your browser; use Argo CD user `admin` and the protected `argocd_admin_password` file in this environment's state directory. Argo's chart generates a self-signed server certificate: use a deliberately trusted local certificate or inspect/trust the local certificate explicitly; do not disable verification in scripts. Credentials must not be printed or put in URLs. The Argo UI is ClusterIP-only, with no public Ingress.
 
+Bootstrap refreshes the protected login file from Argo's initial-admin Secret, including after a clean cluster rebuild. After intentionally rotating the admin password, remove the initial-admin Secret and keep the protected local file consistent with the rotated credential.
+
 Jenkins has no application deployment token in this mode. Its `gitops-observer` credential is a 30-day client certificate whose Role permits only `get` on `argocd/demo` Application; it cannot sync, mutate workloads or read Secrets. Reapply the Jenkins stage before that observer certificate expires (and after cluster recreation):
 
 ```bash
