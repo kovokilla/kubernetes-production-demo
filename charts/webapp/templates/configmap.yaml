@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "webapp.name" . }}-config
+  labels:
+    {{- include "webapp.labels" . | nindent 4 }}
+data:
+  APP_MESSAGE: {{ .Values.message | quote }}
+  BACKEND_URL: {{ printf "http://%s-backend:8080" (include "webapp.name" .) | quote }}

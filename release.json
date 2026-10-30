@@ -1,0 +1,9 @@
+{
+  "commit": "2751c8898d80a318471c7ca41da8e0c0aa4420cb",
+  "build": "19",
+  "tag": "sha-2751c8898d80a318471c7ca41da8e0c0aa4420cb-build-19",
+  "imageIds": {
+    "frontend": "sha256:4c8e2123158e88f665cc13e29cc8335abba99ca473aeefb6b80c0be80b8cc409",
+    "backend": "sha256:51bd687b52fe41d140c6654118aba53ac79e234f71688476136a5e8c35d2afbd"
+  }
+}
