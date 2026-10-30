@@ -1,0 +1,36 @@
+global:
+  domain: localhost
+configs:
+  cm:
+    timeout.reconciliation: 60s
+    application.resourceTrackingMethod: annotation
+  params:
+    server.insecure: false
+  rbac:
+    policy.default: role:readonly
+server:
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: false
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+controller:
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { cpu: "1", memory: 512Mi }
+repoServer:
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 384Mi }
+redis:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+dex:
+  enabled: false
+notifications:
+  enabled: false
+applicationSet:
+  replicas: 0

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
+assert_helm_delivery
 require docker gh kubectl python3 ssh-keygen
 assert_cluster
 docker compose -f "$ROOT/jenkins/compose.yaml" build

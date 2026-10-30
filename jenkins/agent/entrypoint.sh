@@ -7,6 +7,9 @@ install -d -m 700 -o jenkins -g jenkins /home/jenkins/.ssh
 cp /opt/agent-secrets/github_known_hosts /home/jenkins/.ssh/known_hosts
 chown jenkins:jenkins /home/jenkins/.ssh/known_hosts
 chmod 600 /home/jenkins/.ssh/known_hosts
+if test -f /opt/agent-secrets/gitops-config.json; then
+  install -m 600 -o jenkins -g jenkins /opt/agent-secrets/gitops-config.json /home/jenkins/gitops-config.json
+fi
 SOCKET_GID="$(stat -c %g /opt/docker.sock)"
 if ! getent group "$SOCKET_GID" >/dev/null; then
   groupadd -g "$SOCKET_GID" docker-host

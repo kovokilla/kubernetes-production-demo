@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
+assert_helm_delivery
 require docker kind kubectl helm python3
 assert_cluster
 if test -n "$(k -n demo get configmaps -l owner=helm,name=demo -o name)"; then

@@ -4,6 +4,7 @@ import argparse
 from contextlib import ExitStack
 import importlib.util
 import json
+import os
 import re
 from pathlib import Path
 import time
@@ -13,7 +14,21 @@ import urllib.request
 from local_http import LocalHTTPClient, UnsafeLocalRequest
 
 ROOT = Path(__file__).resolve().parents[1]
-STATE = Path.home() / ".local/share/kubernetes-production-demo/grafana"
+STATE = Path(os.environ.get("DEMO_STATE_ROOT", Path.home() / ".local/share/kubernetes-production-demo")) / "grafana"
+
+
+def wait_for_node_series(query, expected, attempts=24):
+    """Rates need multiple scrapes; never treat missing nodes as zero usage."""
+    for attempt in range(attempts):
+        result = query()
+        names = {item["metric"].get("nodename") for item in result.get("data", {}).get("result", [])}
+        if result.get("status") == "success" and names == expected:
+            return result
+        if attempt == 0:
+            print("Waiting for complete node rate-series after monitoring startup", flush=True)
+        if attempt + 1 < attempts:
+            time.sleep(5)
+    raise RuntimeError("Node usage series did not match readiness data after startup wait")
 
 
 def main(base_url=None):
@@ -30,6 +45,8 @@ def main(base_url=None):
         else:
             url = stack.enter_context(monitoring.forward("monitoring-grafana", 80, "/api/health"))
         desired = json.loads((ROOT / "charts/monitoring-resources/files/dashboard.json").read_text())
+        if os.environ.get("DEMO_GITOPS") == "1":
+            desired["panels"] = [panel for panel in desired["panels"] if panel["id"] != 4]
         desired_ids = {panel["id"] for panel in desired["panels"]}
         anonymous = LocalHTTPClient(url)
         authenticated = LocalHTTPClient(url, username="admin", password=password)
@@ -94,15 +111,19 @@ def main(base_url=None):
             raise RuntimeError("Grafana cannot reach the Prometheus datasource")
         panels = dashboard["dashboard"]["panels"]
         metric_panels = [panel for panel in panels if panel.get("targets")]
-        if len(metric_panels) != 12:
-            raise RuntimeError("Expected twelve provisioned metric panels and the kind notice")
+        expected_count = 11 if os.environ.get("DEMO_GITOPS") == "1" else 12
+        if len(metric_panels) != expected_count:
+            raise RuntimeError(f"Expected {expected_count} provisioned metric panels and the kind notice")
         count = 0
         node_names = None
         for panel in metric_panels:
             browser_queries = []
             for target in panel.get("targets", []):
-                result = api("/api/datasources/proxy/uid/prometheus/api/v1/query?" +
-                             urllib.parse.urlencode({"query": target["expr"]}))
+                path = "/api/datasources/proxy/uid/prometheus/api/v1/query?" + urllib.parse.urlencode({"query": target["expr"]})
+                if panel["id"] in (12, 13) and node_names:
+                    result = wait_for_node_series(lambda: api(path), node_names)
+                else:
+                    result = api(path)
                 if result.get("status") != "success" or not result["data"]["result"]:
                     raise RuntimeError(f"No data or query error in panel: {panel['title']}")
                 if panel["id"] in (10, 11, 12, 13):

@@ -1,0 +1,65 @@
+jenkins:
+  systemMessage: "Isolated GitOps demo — trusted source only"
+  numExecutors: 0
+  mode: EXCLUSIVE
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: "${admin_password}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  nodes:
+    - permanent:
+        name: kind-builder
+        labelString: kind-builder
+        numExecutors: 1
+        mode: EXCLUSIVE
+        remoteFS: /home/jenkins/agent
+        launcher:
+          ssh:
+            host: "${DEMO_AGENT_HOST}"
+            port: 22
+            credentialsId: agent-ssh
+            javaPath: /opt/java/openjdk/bin/java
+            launchTimeoutSeconds: 60
+            maxNumRetries: 10
+            retryWaitTime: 10
+            sshHostKeyVerificationStrategy:
+              manuallyProvidedKeyVerificationStrategy:
+                key: "${agent_host_key_public}"
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - basicSSHUserPrivateKey:
+              scope: SYSTEM
+              id: agent-ssh
+              username: jenkins
+              privateKeySource:
+                directEntry:
+                  privateKey: "${agent_key}"
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: github-read-only
+              username: git
+              privateKeySource:
+                directEntry:
+                  privateKey: "${github_deploy_key}"
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: gitops-writer
+              username: git
+              privateKeySource:
+                directEntry:
+                  privateKey: "${gitops_writer_key}"
+          - file:
+              scope: GLOBAL
+              id: gitops-observer
+              fileName: observer.kubeconfig
+              secretBytes: "${readFileBase64:/run/secrets/observer.kubeconfig}"
+unclassified:
+  location:
+    url: "http://127.0.0.1:${DEMO_JENKINS_PORT}/"

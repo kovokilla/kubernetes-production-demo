@@ -4,4 +4,16 @@ metadata:
   name: application-and-jenkins
   labels: { release: monitoring }
 spec:
-  {{- .Files.Get "files/alerts.yaml" | nindent 2 }}
+  {{- $rules := .Files.Get "files/alerts.yaml" | fromYaml }}
+  {{- if .Values.gitops.enabled }}
+  {{- range $group := $rules.groups }}
+  {{- $filtered := list }}
+  {{- range $rule := $group.rules }}
+  {{- if not (hasPrefix "JenkinsCredential" $rule.alert) }}
+  {{- $filtered = append $filtered $rule }}
+  {{- end }}
+  {{- end }}
+  {{- $_ := set $group "rules" $filtered }}
+  {{- end }}
+  {{- end }}
+  {{- $rules | toYaml | nindent 2 }}

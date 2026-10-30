@@ -1,0 +1,8 @@
+# Local NodePort has no cloud load-balancer address. Publish the hostname
+# clients actually use so Argo's standard Ingress health assessment can finish.
+providers:
+  kubernetesIngress:
+    publishedService:
+      enabled: false
+    ingressEndpoint:
+      hostname: demo.localhost

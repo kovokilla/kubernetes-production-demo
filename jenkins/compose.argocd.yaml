@@ -1,0 +1,17 @@
+# Merge with compose.yaml. Same project, containers, home/work/secret volumes.
+services:
+  controller:
+    image: production-demo/jenkins-controller:argocd
+    build:
+      context: ..
+      dockerfile: jenkins/gitops/Dockerfile
+    environment:
+      DEMO_SOURCE_URL: ${DEMO_SOURCE_URL:?Set the reviewed repository SSH URL}
+      DEMO_SOURCE_BRANCH: ${DEMO_SOURCE_BRANCH:?Set the reviewed source branch}
+      DEMO_JENKINS_PORT: "8090"
+      DEMO_AGENT_HOST: production-demo-argocd-agent
+  agent:
+    image: production-demo/jenkins-agent:argocd
+    networks:
+      jenkins:
+        aliases: [agent, production-demo-argocd-agent]

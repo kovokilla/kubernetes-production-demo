@@ -15,6 +15,8 @@ h upgrade --install monitoring prometheus-community/kube-prometheus-stack \
 h upgrade --install monitoring-blackbox prometheus-community/prometheus-blackbox-exporter \
   --namespace monitoring --version "$BLACKBOX_CHART_VERSION" \
   -f "$ROOT/infrastructure/blackbox-values.yaml" --wait --timeout 5m
+GITOPS=false
+if test -f "$HOME/.local/share/kubernetes-production-demo/argocd/ownership.json"; then GITOPS=true; fi
 h upgrade --install monitoring-resources "$ROOT/charts/monitoring-resources" \
-  --namespace monitoring --wait --timeout 5m
+  --namespace monitoring --set "gitops.enabled=$GITOPS" --wait --timeout 5m
 printf 'Monitoring installed. Verify with scripts/monitoring-verify.py and scripts/grafana-verify.py (python3).\n'

@@ -19,6 +19,13 @@ require() {
   done
 }
 
+assert_helm_delivery() {
+  if test -f "$HOME/.local/share/kubernetes-production-demo/argocd/ownership.json"; then
+    printf '%s\n' 'Argo CD owns deployment; use scripts/argocd-setup.py instead of legacy provisioning.' >&2
+    return 1
+  fi
+}
+
 k() {
   kubectl --context "$CONTEXT" "$@"
 }

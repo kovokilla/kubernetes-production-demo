@@ -10,7 +10,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 KUBECTL = str(ROOT / ".tools/kubectl") if (ROOT / ".tools/kubectl").exists() else "kubectl"
-BASE = [KUBECTL, "--context", "kind-production-demo"]
+BASE = [KUBECTL, "--context", os.environ.get("DEMO_CONTEXT", "kind-production-demo")]
 if not shutil.which("docker") and Path("/Applications/Docker.app/Contents/Resources/bin/docker").exists():
     os.environ["PATH"] = "/Applications/Docker.app/Contents/Resources/bin:" + os.environ.get("PATH", "")
 
@@ -28,8 +28,10 @@ def main():
         ("jenkins-controller", "controller", 8080, "http"),
         ("jenkins-agent", "agent", 22, "ssh"),
     ]:
-        container = capture(["docker", "compose", "-f", str(ROOT / "jenkins/compose.yaml"),
-                             "ps", "-q", component])
+        compose = ["docker", "compose", "-f", os.environ.get("DEMO_COMPOSE_FILE", str(ROOT / "jenkins/compose.yaml"))]
+        if os.environ.get("DEMO_COMPOSE_PROJECT"):
+            compose += ["-p", os.environ["DEMO_COMPOSE_PROJECT"]]
+        container = capture(compose + ["ps", "-q", component])
         if not container:
             raise SystemExit(f"Jenkins {component} is not running; start Jenkins first")
         query = '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}'
@@ -51,7 +53,7 @@ def main():
         })
     # This file contains a public timestamp only; no kubeconfig/token is read.
     path = Path.home() / ".local/share/kubernetes-production-demo/jenkins/credential-expiry"
-    expires = path.read_text().strip() if path.exists() else ""
+    expires = path.read_text().strip() if path.exists() and os.environ.get("DEMO_GITOPS") != "1" else ""
     if expires:
         datetime.fromisoformat(expires.replace("Z", "+00:00"))
     documents.append({

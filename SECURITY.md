@@ -37,6 +37,44 @@ repository visibility is not sufficient.
 - Application HTTP and direct kind image loading are lab conveniences, not
   recommendations for public production services.
 
+## Argo CD ownership handoff
+
+The Argo-only path reuses the existing cluster, application and Jenkins
+containers/volumes; it does not provision another cluster or change the CNI.
+Installation alone creates no application ownership. The separate migration
+command requires explicitly approved Git writes and published trusted source.
+It pauses legacy deployment, backs up Jenkins privately, verifies the exact
+deployed chart through server-side dry-runs and preserves application resources
+and Helm history. Checkpoint/ownership records prevent accidental competing
+Helm deployment and permit rollback after a partial handoff.
+
+Argo CD receives a separate read-only repository key. Jenkins GitOps publication
+uses a separately authorized **repository-write** key; it is not restricted to
+the deployment branch by GitHub. Environment markers and non-force pushes are
+safety checks, not an authorization boundary. A compromised Docker-socket agent
+can bypass both Git and Kubernetes controls; do not enable unreviewed PR builds.
+The helper reuses registered keys and does not silently create broader access.
+
+The AppProject restricts the source repository, destination namespace and
+allowed resource kinds. It cannot deploy Secrets or cluster-scoped objects.
+Argo's controller itself has broader platform permissions and must remain
+administrator-controlled. Its UI is ClusterIP-only and uses TLS with a local
+self-signed certificate; inspect/trust that certificate rather than disabling
+verification in scripts.
+
+The active GitOps job receives no direct Kubernetes deployment credential.
+Its observer client certificate requests a 30-day lifetime and permits only
+GET of the single `demo` Application in `argocd`. Inspect the actual issued
+expiry and renew through the Argo helper while CI is idle; no observer-expiry
+alert is currently configured. Old deployment-token material is retained
+privately for rollback, not bound to the GitOps job.
+
+Migration backups contain sensitive Jenkins data and must remain outside Git
+with restricted permissions. A failed handoff leaves CI disabled intentionally.
+Do not erase the checkpoint or force legacy deployment while Argo still owns
+the application. Ownership rollback removes only a verified, non-cascading
+Application and does not uninstall the workloads.
+
 ## Local HTTP clients
 
 Credential-bearing local helpers are bound to one validated HTTP loopback

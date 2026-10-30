@@ -14,3 +14,6 @@
 **/*.kubeconfig
 **/kubeconfig
 **/_README.private.md
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan

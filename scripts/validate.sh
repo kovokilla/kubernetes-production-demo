@@ -40,4 +40,7 @@ helm package "$ROOT/charts/webapp" --destination "$ROOT/.artifacts"
 helm lint "$ROOT/charts/monitoring-resources" --strict
 helm template monitoring-resources "$ROOT/charts/monitoring-resources" --namespace monitoring \
   --kube-version 1.34.0 > "$ROOT/.artifacts/monitoring-resources.yaml"
+helm lint "$ROOT/charts/monitoring-resources" --strict --set gitops.enabled=true
+helm template monitoring-resources "$ROOT/charts/monitoring-resources" --namespace monitoring \
+  --kube-version 1.34.0 --set gitops.enabled=true > "$ROOT/.artifacts/monitoring-gitops.yaml"
 printf 'Local validation passed. Live cluster checks: bash scripts/smoke-test.sh\n'

@@ -2,12 +2,16 @@
 
 Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap and Secret configuration, RBAC, NetworkPolicy, Jenkins CI/CD, and Prometheus/Alertmanager/Grafana monitoring.
 
+Argo CD can be added to the **existing** cluster using the [Argo CD handoff](#argo-cd-on-the-existing-stack). Jenkins/Helm remains the active deployer until that explicit handoff completes. There is no Terraform provisioning or second-cluster requirement in this branch.
+
 **Application:** http://demo.localhost:8080 · **Jenkins:** http://127.0.0.1:8090 · **Job:** `production-demo`
 
 ## Contents
 
 - [Architecture](#architecture)
 - [Files](#files)
+- [Presentation](#presentation)
+- [Argo CD on the existing stack](#argo-cd-on-the-existing-stack)
 - [Run locally](#run-locally)
 - [Security](#security)
 - [Public-release checklist](#public-release-checklist)
@@ -21,7 +25,11 @@ Scope: frontend/backend Deployments, ClusterIP Services and Ingress, ConfigMap a
 
 ## Architecture
 
-Browser → Traefik (`ingress` namespace) → frontend ClusterIP Service → frontend pods → backend ClusterIP Service → backend pods (`demo` namespace).
+Logical route: browser → Traefik (`ingress` namespace) → frontend Service/pods → backend ClusterIP Service → backend pods (`demo` namespace).
+
+Docker Desktop provides one Linux VM; the control-plane and two kind workers are Docker containers, not independent machines. Jenkins runs outside Kubernetes as the existing Compose controller/SSH-agent pair. Monitoring and, when installed, Argo CD run inside the same cluster.
+
+Clicking **Refresh API response** sends `GET /api/info` to `demo.localhost:8080`. Docker forwards port 8080 to the control-plane container's NodePort 30080. Traefik selects a frontend endpoint through its Service and normally forwards directly to a pod IP. The frontend opens a separate request to `demo-backend:8080`; CoreDNS resolves the Service and Kubernetes routes it to a backend replica. JSON returns through frontend → Traefik → browser without reloading the page. Jenkins and Argo CD are deployment tools, not part of that request path.
 
 - **Frontend:** static HTML/JavaScript served by Node.js, with a fixed same-origin `/api/info` reverse proxy.
 - **Backend:** dependency-free Node.js JSON API. `/healthz` and `/readyz` support Kubernetes probes.
@@ -36,17 +44,101 @@ Local kind is a reproducible exercise environment, not a highly available produc
 
 - `apps/frontend`, `apps/backend`: applications, tests and Dockerfiles.
 - `charts/webapp`: application Helm chart.
-- `charts/monitoring-resources`: monitoring probes, alert rules and local receiver.
+- `charts/monitoring-resources`: monitoring probes, alert rules, Grafana dashboard and local receiver.
 - `environments/local/values.yaml`: local images and HTTP ingress.
 - `environments/production/values.yaml`: optional HTTPS configuration for a real deployment.
 - `environments/jenkins/values.yaml`: local-kind delivery settings used by Jenkins.
 - `infrastructure`: kind, namespaces, pinned dependency versions, Traefik and optional deployment RBAC.
 - `infrastructure/monitoring-values.yaml`, `infrastructure/blackbox-values.yaml`: bounded monitoring stack settings.
 - `Jenkinsfile`: checkout → validate → build → load images → package → deploy → verify.
+- `Jenkinsfile.gitops`, `jenkins/gitops`, `jenkins/compose.argocd.yaml`: optional GitOps delivery mode using the same Jenkins containers/volumes.
+- `scripts/argocd-setup.py`: install, adoption check, explicit handoff, verification, observer renewal and rollback.
+- `infrastructure/argocd-values.yaml`, `infrastructure/gitops-*.yaml`: pinned private Argo installation and restricted webapp ownership.
 - `jenkins`: Docker Compose controller/agent, pinned plugins and configuration as code.
 - `scripts`: bootstrap, local deployment and validation.
 - `SECURITY.md`: trust boundaries, vulnerability reporting and release safeguards.
 - `.gitleaks.toml`: default secret detectors with one exact public dependency-pin exception.
+
+## Presentation
+
+The local companion `~/Kubernetes-Demo-Overview.pptx` has 11 slides, editable diagrams and speaker notes for an approximately 8–10 minute overview. It is outside the checkout and is not downloaded by cloning the repository. Obtain it separately on another machine.
+
+```bash
+open "$HOME/Kubernetes-Demo-Overview.pptx"
+```
+
+Use PowerPoint or Keynote and its notes/presenter view. The slides describe the original Jenkins/Helm architecture, not current health or the later Argo handoff; update them before presenting GitOps diagrams. The live demo remains `http://demo.localhost:8080`; show **Refresh API response** and, optionally, the private Grafana dashboard. Never display credentials or sensitive logs while presenting.
+
+## Argo CD on the existing stack
+
+### Install without changing deployment ownership
+
+With the original cluster, Jenkins and monitoring running:
+
+```bash
+python3 scripts/argocd-setup.py install
+python3 scripts/argocd-setup.py check
+.tools/kubectl --context kind-production-demo -n argocd port-forward --address 127.0.0.1 service/argocd-server 18081:443
+```
+
+The pinned chart version is in `infrastructure/versions.env`. Open `https://localhost:18081`, inspect/trust the self-signed local certificate, and sign in as `admin` using the protected `~/.local/share/kubernetes-production-demo/argocd/admin_password` file through your password manager. No value is printed. The UI is ClusterIP-only and serves TLS; no public Ingress or always-running host port is created.
+
+`install` adds only Argo CD: it does not create a webapp Application, pause Jenkins, reinstall Calico or create another cluster. `check` downloads the exact currently deployed Jenkins chart, verifies its provenance against the active ConfigMap-backed Helm release, and compares its render and server-side dry-run results to the live workload configuration. It does not sync or publish anything.
+
+### Explicit Jenkins → Argo CD handoff
+
+Publish and review the Argo-only implementation on the selected trusted source branch first. Local files alone cannot change remote SCM. The migration checks required source hashes before pausing the existing job.
+
+It reuses previously authorized Argo read-only and GitOps repository-write keys; it does not register new keys or widen permissions. On another workstation, supply those separately authorized keys privately at `argocd/repo_key` and `jenkins/gitops_writer_key` under `~/.local/share/kubernetes-production-demo/`. The writer is **repository-wide**, not branch-limited. Run only trusted source code on the Docker-socket agent.
+
+After explicitly authorizing Git writes and the ownership switch:
+
+```bash
+python3 scripts/argocd-setup.py migrate --source-branch main --allow-git-writes
+```
+
+Use `--source-branch feat/argocd` instead only after that integration branch is published and reviewed. The dedicated deployment branch defaults to `gitops/production-demo`; it must not be the source branch or belong to another environment.
+
+The handoff pauses the legacy job, privately backs up its configuration/home/bootstrap volumes, and seeds GitOps from the **exact live release**, not an arbitrary newer source revision. Jenkins briefly restarts for a consistent backup and mode switch; application pods are not uninstalled. The first adoption must preserve existing workload specs. Helm history is retained, and no `helm uninstall demo` is performed.
+
+Argo CD then exclusively reconciles the webapp in `demo`. Its AppProject restricts source/destination and resource kinds, excludes Secrets and cluster-scoped resources, and enables automatic sync/self-healing/pruning. The local Traefik hostname overlay supplies `demo.localhost` in Ingress status so standard Argo health checks work with NodePort; real HTTP/API checks remain mandatory.
+
+The same Jenkins controller/agent, UI port 8090, home and volumes are reused. A single startup script configures the job. `Jenkinsfile.gitops` replaces direct Helm delivery with test → build → load immutable images into all three kind nodes → non-force GitOps publication → wait for exact Argo revision → verify API/HTML. Source-only polling prevents a deployment-branch feedback loop.
+
+Argo's revision is the deployment-branch commit, not the source SHA in the image tag; `release.json` on that branch records the relationship. Helm history/listing becomes historical application information after adoption, not the active deployment authority.
+
+### Verify, renew and roll back
+
+After handoff:
+
+```bash
+.tools/kubectl --context kind-production-demo -n argocd get applications
+.tools/kubectl --context kind-production-demo -n demo get deployments,pods
+python3 scripts/argocd-setup.py verify
+```
+
+Verification includes application/RBAC/NetworkPolicy smoke tests, monitoring probes and synthetic local alert delivery, Grafana login/datasource/panel checks. GitOps monitoring mode removes the obsolete deployment-token-expiry signals: seven rules and eleven metric panels plus the kind notice remain. Before handoff, legacy monitoring retains ten rules/twelve metric panels. Other existing monitoring components are not replaced.
+
+Jenkins receives a read-only observer certificate, requested for 30 days, allowing only GET of the single `argocd/demo` Application—not deployment or Secret access. Renew before its actual signer-issued expiry while the job is idle:
+
+```bash
+python3 scripts/argocd-setup.py renew-observer
+```
+
+Renewal uses the recorded source branch, updates only the observer credential and reloads Jenkins. No observer-expiry alert is currently installed. Do not use the legacy deployment-token renewal command in Argo mode.
+
+For an application rollback, revert the deployment branch's chart/image references to a known release whose images remain on every node. Argo reconciles Git; do not run `helm rollback` against an Argo-owned application.
+
+To intentionally return deployment ownership to the old Jenkins/Helm mode while the job is idle:
+
+```bash
+python3 scripts/argocd-setup.py rollback
+bash scripts/jenkins-refresh-credentials.sh
+```
+
+Rollback disables automatic sync and removes only the expected non-cascading Argo Application, leaving workloads and Helm history intact. It restores the original Jenkins images/job mode and legacy monitoring rules; Argo itself remains installed. Renew the old deploy token before the next Helm delivery.
+
+If migration fails, the job deliberately stays disabled to prevent competing deployers. Protected `argocd/handoff.json` records the last checkpoint and backup directory; rollback supports a partially completed handoff. Do not clear ownership records or re-enable legacy deployment blindly. Legacy setup/deployment commands refuse operation while an Argo ownership marker exists.
 
 ## Run locally
 
@@ -70,7 +162,7 @@ bash scripts/deploy-local.sh
 bash scripts/smoke-test.sh
 ```
 
-Skip cloning if you already have the repository. GitHub authentication must permit reading the private repository; Jenkins setup also requires permission to register a read-only deploy key. Internet access is needed for image, plugin, binary and chart downloads, and SSH access to GitHub is needed for Jenkins checkout.
+Skip cloning if you already have the repository. GitHub authentication must permit repository access when private; Jenkins setup also requires permission to register a read-only deploy key. Internet access is needed for image, plugin, binary and chart downloads, and SSH access to GitHub is needed for Jenkins checkout.
 
 Allocate approximately 4 CPUs and 6 GB RAM for the application, or 8 CPUs and 8 GB RAM with Jenkins. Ports 8080 and 8443 must be free; Jenkins additionally uses 8090. Bootstrap downloads the pinned kind node, Calico manifest and Traefik chart. Review dependency versions in `infrastructure/versions.env` before upgrading.
 
@@ -103,6 +195,8 @@ Application NetworkPolicies allow only:
 3. Frontend pods → backend pods in the same namespace, TCP 8080.
 
 All other application pod ingress and egress is denied. Return traffic for permitted connections is allowed by the CNI. These policies require an enforcing CNI; kind's default CNI is deliberately disabled. Label-based isolation assumes untrusted users cannot create or relabel privileged workloads. Do not install unrelated workloads in the dedicated `demo` namespace.
+
+The four application policies are in `charts/webapp/templates/networkpolicy.yaml`. `demo-default-deny` selects every pod in `demo` and has no allow rules; the separate DNS/frontend/backend policies add the allowed paths. NetworkPolicies are additive, so describing only default-deny will not show those other rules. The monitoring receiver has its own separate policy; the application's default-deny does not cover all monitoring pods.
 
 `smoke-test.sh` verifies the full ingress/API path, positive and negative RBAC checks, allowed frontend → backend traffic, denied backend → frontend traffic, and denied access from an unrelated namespace. It creates a temporary test namespace and removes it afterward. It requires administrator impersonation and namespace-creation rights; it is not intended to run as `demo-reader`.
 
@@ -138,6 +232,8 @@ GitHub can reject branch-protection/ruleset configuration for a private reposito
 The Jenkins/Grafana HTTP helpers now bind credentials to the configured loopback scheme/host/port, reject unsafe redirects and disable environment proxies. Same-origin redirects continue to work. This does not authenticate an unknown process listening on localhost; prefer helper-owned port-forwards and do not send local admin credentials to an untrusted listener.
 
 ## Jenkins CI/CD
+
+This section describes the original direct-Helm mode. After the explicit Argo handoff, use `Jenkinsfile.gitops` and the Argo operations above; do not enable both deployment paths.
 
 The source repository remains on GitHub. Jenkins polls only `main` every two minutes; no public webhook, tunnel or GitHub Actions runner is needed. The local setup targets Apple Silicon/Linux ARM64 containers and requires Docker Compose plus an authenticated `gh` CLI with permission to register a read-only repository deploy key.
 
