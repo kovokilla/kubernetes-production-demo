@@ -1,48 +1,48 @@
-backend:
-  image:
-    digest: ''
-    pullPolicy: Never
-    repository: demo/backend
-    tag: sha-2751c8898d80a318471c7ca41da8e0c0aa4420cb-build-19
-  replicas: 2
-  resources:
-    limits:
-      cpu: 500m
-      memory: 128Mi
-    requests:
-      cpu: 100m
-      memory: 64Mi
+fullnameOverride: demo
+message: Hello from Kubernetes!
 existingSecret: demo-app
+secretRevision: '1'
+imagePullSecrets: []
 frontend:
   image:
+    repository: demo/frontend
+    tag: sha-e0dca061b1e43106998baf0f5722b8d71a957883-build-20
     digest: ''
     pullPolicy: Never
-    repository: demo/frontend
-    tag: sha-2751c8898d80a318471c7ca41da8e0c0aa4420cb-build-19
   replicas: 2
   resources:
-    limits:
-      cpu: 500m
-      memory: 128Mi
     requests:
       cpu: 100m
       memory: 64Mi
-fullnameOverride: demo
-imagePullSecrets: []
+    limits:
+      cpu: 500m
+      memory: 128Mi
+backend:
+  image:
+    repository: demo/backend
+    tag: sha-e0dca061b1e43106998baf0f5722b8d71a957883-build-20
+    digest: ''
+    pullPolicy: Never
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
 ingress:
+  enabled: true
+  className: traefik
+  host: demo.localhost
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
     traefik.ingress.kubernetes.io/router.tls: 'false'
-  className: traefik
-  enabled: true
-  host: demo.localhost
   tls:
     enabled: false
-message: Hello from Kubernetes!
 networkPolicy:
   enabled: true
   ingressNamespace: ingress
 rbac:
   enabled: true
   readerGroup: demo-readers
-secretRevision: '1'
