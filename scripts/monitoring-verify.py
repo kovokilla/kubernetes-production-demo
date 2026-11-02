@@ -10,6 +10,7 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+from gitops_support import is_gitops
 
 ROOT = Path(__file__).resolve().parents[1]
 KUBECTL = str(ROOT / ".tools/kubectl") if (ROOT / ".tools/kubectl").exists() else "kubectl"
@@ -92,13 +93,13 @@ def main():
         print(f"All {len(targets)} active scrape targets and all three availability probes are healthy")
         groups = json.loads(get(prometheus + "/api/v1/rules?type=alert"))["data"]["groups"]
         rules = [rule for group in groups for rule in group["rules"] if group["name"] == "application-and-jenkins"]
-        expected_count = 7 if os.environ.get("DEMO_GITOPS") == "1" else 10
+        expected_count = 7 if is_gitops() else 10
         if len(rules) != expected_count or any(rule.get("health") != "ok" for rule in rules):
             raise RuntimeError(f"Expected {expected_count} healthy application/Jenkins alert rules")
         managers = json.loads(get(prometheus + "/api/v1/alertmanagers"))["data"]["activeAlertmanagers"]
         if not managers:
             raise RuntimeError("Prometheus has no active Alertmanager connection")
-        if os.environ.get("DEMO_GITOPS") != "1":
+        if not is_gitops():
             expiry = query(prometheus, "jenkins_deployer_credential_expiry_timestamp_seconds")
             if not expiry or float(expiry[0]["value"][1]) <= 0:
                 raise RuntimeError("Public credential-expiry metadata is missing")

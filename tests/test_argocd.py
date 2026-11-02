@@ -1,4 +1,5 @@
 import base64
+from contextlib import nullcontext
 import importlib.util
 import io
 import json
@@ -10,7 +11,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 import yaml
 
@@ -32,6 +33,30 @@ CONFIG = setup.configuration()
 
 
 class ArgoMigrationTests(unittest.TestCase):
+    def test_active_mode_is_detected_without_manual_environment_flags(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(support, "ARGO_STATE", Path(directory)), \
+                patch.dict(os.environ, {"DEMO_GITOPS": "0"}):
+            self.assertFalse(support.is_gitops())
+            (Path(directory) / "ownership.json").write_text("{}")
+            self.assertTrue(support.is_gitops())
+
+    def test_source_change_requires_an_explicit_branch(self):
+        with patch.object(setup, "source_is_published") as source:
+            with self.assertRaises(SystemExit):
+                setup.set_source(CONFIG, None)
+            source.assert_not_called()
+
+    def test_mode_switch_enables_job_and_queues_polling_baseline(self):
+        client = Mock()
+        client.request.return_value = nullcontext()
+        opener = object()
+        setup.start_gitops_baseline(client, opener)
+        self.assertEqual(client.request.call_args_list, [
+            call(opener, "/job/production-demo/enable", b""),
+            call(opener, "/job/production-demo/build", b""),
+        ])
+
     def test_targets_only_existing_cluster_and_ports(self):
         self.assertEqual(CONFIG["cluster_name"], "production-demo")
         self.assertEqual([CONFIG[k] for k in ("http_port", "https_port", "jenkins_port")], [8080, 8443, 8090])

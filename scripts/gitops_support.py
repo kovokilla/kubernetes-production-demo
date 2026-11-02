@@ -11,6 +11,10 @@ ARGO_STATE = STATE / "argocd"
 JENKINS_STATE = STATE / "jenkins"
 
 
+def is_gitops():
+    return os.environ.get("DEMO_GITOPS") == "1" or (ARGO_STATE / "ownership.json").exists()
+
+
 def tool_environment():
     env = dict(os.environ)
     env["PATH"] = os.pathsep.join([

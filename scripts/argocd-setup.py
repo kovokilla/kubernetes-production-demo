@@ -321,6 +321,15 @@ def record_handoff(c, directory, phase):
     }))
 
 
+def start_gitops_baseline(client, opener):
+    # WorkflowJob polls SCMs recorded by its last build. A definition change
+    # alone can leave it polling legacy main until one new checkout completes.
+    with client.request(opener, "/job/production-demo/enable", b""):
+        pass
+    with client.request(opener, "/job/production-demo/build", b""):
+        pass
+
+
 def migrate(c, allowed):
     if not allowed:
         raise SystemExit("Migration requires --allow-git-writes: publish the exact live release and switch deployment ownership.")
@@ -373,11 +382,10 @@ def migrate(c, allowed):
     helm(c, "monitoring-resources", ROOT / "charts/monitoring-resources", "monitoring",
          extra=["--set", "gitops.enabled=true"])
     client = load("jenkins-client")
-    with client.request(client.client(), "/job/production-demo/enable", b""):
-        pass
+    start_gitops_baseline(client, client.client())
     run(["python3", ROOT / "scripts/monitoring-sync-targets.py"], env=stage_environment(c))
     record_handoff(c, directory, "active")
-    print("Argo CD owns demo; existing Jenkins job now publishes GitOps state. Helm history preserved.")
+    print("Argo CD owns demo; GitOps baseline build queued, subsequent source changes use SCM polling. Helm history preserved.")
 
 
 def renew_observer(c):
@@ -395,6 +403,29 @@ def renew_observer(c):
     if not job["disabled"]:
         with client.request(opener, "/job/production-demo/enable", b""):
             pass
+
+
+def set_source(c, source):
+    if not source:
+        raise SystemExit("set-source requires an explicit --source-branch")
+    updated = validate_config(dict(c, source_branch=source))
+    source_is_published(updated)
+    client = load("jenkins-client")
+    opener = client.client()
+    with client.request(opener, "/job/production-demo/api/json?tree=disabled,inQueue,lastBuild[building]") as response:
+        job = json.load(response)
+    if job["disabled"] or job["inQueue"] or (job.get("lastBuild") or {}).get("building"):
+        raise RuntimeError("Wait for an idle enabled job before changing its source branch")
+    with client.request(opener, "/job/production-demo/disable", b""):
+        pass
+    save_private(JENKINS_STATE / "gitops-config.json", json.dumps(updated))
+    switch_jenkins(updated)
+    save_private(ARGO_STATE / "ownership.json", json.dumps(updated))
+    record_handoff(updated, ARGO_STATE / "backups", "active")
+    client = load("jenkins-client")
+    start_gitops_baseline(client, client.client())
+    run(["python3", ROOT / "scripts/monitoring-sync-targets.py"], env=stage_environment(updated))
+    print("Trusted source branch updated; a fresh SCM baseline build was queued")
 
 
 def rollback(c):
@@ -434,14 +465,14 @@ def rollback(c):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["install", "check", "migrate", "renew-observer", "verify", "rollback"])
-    parser.add_argument("--source-branch", default="main")
+    parser.add_argument("action", choices=["install", "check", "migrate", "renew-observer", "verify", "rollback", "set-source"])
+    parser.add_argument("--source-branch")
     parser.add_argument("--repository", default="kovokilla/kubernetes-production-demo")
     parser.add_argument("--gitops-branch", default="gitops/production-demo")
     parser.add_argument("--allow-git-writes", action="store_true")
     args = parser.parse_args()
-    c = configuration(args.source_branch, args.repository, args.gitops_branch)
-    if args.action in ("renew-observer", "verify", "rollback"):
+    c = configuration(args.source_branch or "main", args.repository, args.gitops_branch)
+    if args.action in ("renew-observer", "verify", "rollback", "set-source"):
         marker = ARGO_STATE / "ownership.json"
         journal = ARGO_STATE / "handoff.json"
         if args.action == "rollback" and not marker.exists() and journal.exists():
@@ -462,6 +493,8 @@ def main():
         rollback(c)
     elif args.action == "renew-observer":
         renew_observer(c)
+    elif args.action == "set-source":
+        set_source(c, args.source_branch)
     else:
         for command in (["bash", ROOT / "scripts/smoke-test.sh"],
                         ["python3", ROOT / "scripts/monitoring-verify.py"],

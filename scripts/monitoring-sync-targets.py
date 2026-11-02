@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from gitops_support import is_gitops
 
 ROOT = Path(__file__).resolve().parents[1]
 KUBECTL = str(ROOT / ".tools/kubectl") if (ROOT / ".tools/kubectl").exists() else "kubectl"
@@ -53,7 +54,7 @@ def main():
         })
     # This file contains a public timestamp only; no kubeconfig/token is read.
     path = Path.home() / ".local/share/kubernetes-production-demo/jenkins/credential-expiry"
-    expires = path.read_text().strip() if path.exists() and os.environ.get("DEMO_GITOPS") != "1" else ""
+    expires = path.read_text().strip() if path.exists() and not is_gitops() else ""
     if expires:
         datetime.fromisoformat(expires.replace("Z", "+00:00"))
     documents.append({

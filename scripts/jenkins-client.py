@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.request
 from local_http import LocalHTTPClient, UnsafeLocalRequest
+from gitops_support import is_gitops
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = (Path(os.environ["DEMO_STATE_ROOT"]) if "DEMO_STATE_ROOT" in os.environ
@@ -51,7 +52,7 @@ def main(action, number=None):
             print(json.dumps(json.load(response), indent=2))
     elif action == "lint":
         boundary = "jenkins-pipeline-check"
-        content = (ROOT / ("Jenkinsfile.gitops" if os.environ.get("DEMO_GITOPS") == "1" else "Jenkinsfile")).read_bytes()
+        content = (ROOT / ("Jenkinsfile.gitops" if is_gitops() else "Jenkinsfile")).read_bytes()
         body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"jenkinsfile\"\r\n\r\n".encode()
                 + content + f"\r\n--{boundary}--\r\n".encode())
         with request(opener, "/pipeline-model-converter/validate", body, f"multipart/form-data; boundary={boundary}") as response:
@@ -77,15 +78,15 @@ def main(action, number=None):
         with request(opener, f"/job/production-demo/{number}/consoleText") as response:
             text = response.read().decode()
         # Additional local defense in case a plugin reports credential values.
-        names = ("admin_password", "agent_key", "github_deploy_key", "gitops_writer_key", "observer.kubeconfig") if os.environ.get("DEMO_GITOPS") == "1" else ("admin_password", "agent_key", "github_deploy_key", "kubeconfig")
+        names = ("admin_password", "agent_key", "github_deploy_key", "gitops_writer_key", "observer.kubeconfig") if is_gitops() else ("admin_password", "agent_key", "github_deploy_key", "kubeconfig")
         for name in names:
-            value = (STATE / name).read_text().strip()
+            value = (STATE / name).read_text().strip() if (STATE / name).exists() else ""
             if value:
                 text = text.replace(value, "[REDACTED]")
-        if os.environ.get("DEMO_GITOPS") != "1":
+        if not is_gitops():
             config = json.loads((STATE / "kubeconfig").read_text())
             text = text.replace(config["users"][0]["user"]["token"], "[REDACTED]")
-        else:
+        elif (STATE / "observer.kubeconfig").exists():
             config = json.loads((STATE / "observer.kubeconfig").read_text())
             text = text.replace(config["users"][0]["user"]["client-key-data"], "[REDACTED]")
         print(text)

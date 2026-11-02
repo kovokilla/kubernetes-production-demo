@@ -105,6 +105,16 @@ Argo CD then exclusively reconciles the webapp in `demo`. Its AppProject restric
 
 The same Jenkins controller/agent, UI port 8090, home and volumes are reused. A single startup script configures the job. `Jenkinsfile.gitops` replaces direct Helm delivery with test → build → load immutable images into all three kind nodes → non-force GitOps publication → wait for exact Argo revision → verify API/HTML. Source-only polling prevents a deployment-branch feedback loop.
 
+The handoff queues one initial GitOps build to establish the new checkout baseline. Jenkins otherwise continues polling the SCM recorded by the previous build, even after the job definition changes. After that baseline succeeds, later source pushes are detected automatically by polling.
+
+If testing used `feat/argocd`, merging it does not automatically change the active job's source branch. After merging/reviewing the implementation on `main`, switch explicitly while CI is idle:
+
+```bash
+python3 scripts/argocd-setup.py set-source --source-branch main
+```
+
+This verifies the published source, preserves GitOps ownership, updates the job and queues its new polling baseline. The normal Jenkins/monitoring/Grafana helpers automatically recognize recorded Argo mode; manual `DEMO_GITOPS` flags are not required.
+
 Argo's revision is the deployment-branch commit, not the source SHA in the image tag; `release.json` on that branch records the relationship. Helm history/listing becomes historical application information after adoption, not the active deployment authority.
 
 ### Verify, renew and roll back
@@ -134,9 +144,10 @@ To intentionally return deployment ownership to the old Jenkins/Helm mode while 
 ```bash
 python3 scripts/argocd-setup.py rollback
 bash scripts/jenkins-refresh-credentials.sh
+python3 scripts/jenkins-client.py build
 ```
 
-Rollback disables automatic sync and removes only the expected non-cascading Argo Application, leaving workloads and Helm history intact. It restores the original Jenkins images/job mode and legacy monitoring rules; Argo itself remains installed. Renew the old deploy token before the next Helm delivery.
+Rollback disables automatic sync and removes only the expected non-cascading Argo Application, leaving workloads and Helm history intact. It restores the original Jenkins images/job mode and legacy monitoring rules; Argo itself remains installed. Renew the old deploy token before the next Helm delivery, then run one build to restore the `main` polling baseline.
 
 If migration fails, the job deliberately stays disabled to prevent competing deployers. Protected `argocd/handoff.json` records the last checkpoint and backup directory; rollback supports a partially completed handoff. Do not clear ownership records or re-enable legacy deployment blindly. Legacy setup/deployment commands refuse operation while an Argo ownership marker exists.
 
